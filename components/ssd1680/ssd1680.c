@@ -292,7 +292,7 @@ esp_err_t ssd1680_test_pattern(ssd1680_handle_t h) {
 
     const uint8_t start_end_x[2] = {
         (0 / 8) & 0x1f, // X start on 5 bits
-        (128 / 8) & 0x1f, // X end on 5 bits
+        (127 / 8) & 0x1f, // X end on 5 bits
     };
     err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_X, start_end_x, sizeof(start_end_x));
     if (err != ESP_OK)
@@ -342,18 +342,10 @@ esp_err_t ssd1680_test_pattern(ssd1680_handle_t h) {
         .flags = SPI_TRANS_CS_KEEP_ACTIVE
     };
 
-    //memset(line, 0, sizeof(line));
     int row = 0;
-    /*
-    for (row = 0; row < 2; ++row) {
-        err = spi_device_polling_transmit(h->spi, &payload);
-        if (err != ESP_OK)
-            goto defer;
-    }*/
-
-    memset(line, 0xff, sizeof(line));
     for (; row < 296; ++row) {
-        if (row == 295) payload.flags = 0;
+        memset(line, (row & 2) ? 0xcc : 0x33, sizeof(line));
+        if (row == 296) payload.flags = 0;
         err = spi_device_polling_transmit(h->spi, &payload);
         if (err != ESP_OK)
             goto defer;
