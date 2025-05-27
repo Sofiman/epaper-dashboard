@@ -13,6 +13,10 @@
 
 static const char *TAG = "main";
 
+#define SCREEN_ROWS 296
+#define SCREEN_COLS 128
+static uint8_t framebuffer[((SCREEN_COLS - 1) / 8 + 1) * SCREEN_ROWS];
+
 void app_main(void)
 {
     esp_err_t ret;
@@ -34,12 +38,15 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     ssd1680_config_t ssd1680_config = {
+        .host = SPI2_HOST,
         .busy_pin = GPIO_NUM_0,
         .reset_pin = GPIO_NUM_1,
         .dc_pin = GPIO_NUM_5,
         .cs_pin = GPIO_NUM_10,
-        .lines = 296,
-        .host = SPI2_HOST,
+
+        .rows = SCREEN_ROWS,
+        .cols = SCREEN_COLS,
+        .framebuffer = framebuffer
     };
 
     ssd1680_handle_t ssd1680_handle;
@@ -50,9 +57,23 @@ void app_main(void)
 
     vTaskDelay(10 / portTICK_PERIOD_MS);
 
-    ret = ssd1680_test_pattern(ssd1680_handle);
+    memset(framebuffer, 0xff, sizeof(framebuffer));
+    ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
+        .x = 0, .y = 0,
+        .w = SCREEN_COLS, .h = SCREEN_ROWS
+    });
+    ESP_ERROR_CHECK(ret);
+    ret = ssd1680_full_refresh(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
 
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+    memset(framebuffer, 0xaa, sizeof(framebuffer));
+    ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
+        .x = 32, .y = 116,
+        .w = 64, .h = 64
+    });
+    ESP_ERROR_CHECK(ret);
     ret = ssd1680_full_refresh(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
 

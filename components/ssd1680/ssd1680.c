@@ -97,7 +97,10 @@ enum TemperatureSensorSelection {
 
 /// Context (config and data) of the spi_ssd1680
 struct ssd1680_context_t {
-    ssd1680_config_t cfg;        ///< Configuration by the caller.
+    union { ///< Configuration by the caller.
+        const ssd1680_config_t cfg;
+        ssd1680_config_t init_cfg;
+    };
     spi_device_handle_t spi;    ///< SPI device handle
 };
 
@@ -152,19 +155,24 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
         ESP_LOGE(TAG, "interrupt cannot be used on SPI1 host.");
         return ESP_ERR_INVALID_ARG;
     }
-    if (cfg->lines < 16 || cfg->lines > 296) {
-        ESP_LOGE(TAG, "Line configuration not supported by the display driver.");
+    if (cfg->cols < 1 || cfg->cols > 176) {
+        ESP_LOGE(TAG, "Column configuration not supported by the display driver.");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (cfg->rows < 16 || cfg->rows > 296) {
+        ESP_LOGE(TAG, "Row configuration not supported by the display driver.");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (cfg->framebuffer == NULL) {
+        ESP_LOGE(TAG, "Framebuffer is required.");
         return ESP_ERR_INVALID_ARG;
     }
 
-    ssd1680_context_t* ctx = (ssd1680_context_t*)malloc(sizeof(ssd1680_context_t));
-    if (!ctx) {
+    ssd1680_context_t *ctx = malloc(sizeof(ssd1680_context_t));
+    if (ctx == NULL)
         return ESP_ERR_NO_MEM;
-    }
 
-    *ctx = (ssd1680_context_t) {
-        .cfg = *cfg,
-    };
+    ctx->init_cfg = *cfg;
 
     spi_device_interface_config_t devcfg = {
         .mode = 0,
@@ -215,10 +223,10 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
      *    • Set panel border by Command 0x3C
      */
     {
-        const uint16_t lines = cfg->lines - 1;
+        const uint16_t rows = cfg->rows - 1;
         const uint8_t driver_output_control[3] = {
-            (uint8_t)(lines & 0xff),
-            (uint8_t)(lines >> 8), // SAFETY: Reserved bits 1-7 are guarantted to be 0 as the lines config check (<=296)
+            (uint8_t)(rows & 0xff),
+            (uint8_t)(rows >> 8), // SAFETY: Reserved bits 1-7 are guarantted to be 0 as the lines config check (<=296)
             (0 << 2) // Selects the 1st output Gate
                 | (0 << 1) // Change scanning order of gate driver.
                 | (0 << 0), // Change scanning direction of gate driver.
@@ -284,41 +292,69 @@ cleanup:
     return err;
 }
 
-esp_err_t ssd1680_test_pattern(ssd1680_handle_t h) {
-    if (h->spi == NULL)
+esp_err_t ssd1680_deinit(ssd1680_handle_t *ctx) {
+    if ((*ctx)->spi == NULL)
         return ESP_ERR_INVALID_ARG;
 
     esp_err_t err;
 
+    /* 6. Power Off
+     *    • Deep sleep by Command 0x10
+     */
+    {
+        const uint8_t deep_sleep_mode = DEEP_SLEEP_MODE_1;
+        err = ssd1680_cmd_write(*ctx, CMD_DeepSleepMode, &deep_sleep_mode, sizeof(deep_sleep_mode));
+    }
+
+    spi_bus_remove_device((*ctx)->spi);
+    (*ctx)->spi = NULL;
+
+    free(*ctx);
+    *ctx = NULL;
+    return err;
+}
+
+esp_err_t ssd1680_flush(ssd1680_handle_t h, ssd1680_rect_t rect) {
+    if (h->spi == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (rect.x > h->cfg.cols || rect.x + rect.w > h->cfg.cols)
+        return ESP_ERR_INVALID_ARG;
+    if (rect.y > h->cfg.rows || rect.y + rect.h > h->cfg.rows)
+        return ESP_ERR_INVALID_ARG;
+
+    esp_err_t err;
+
+    /* Setup address auto-increment */
+
     const uint8_t start_end_x[2] = {
-        (0 / 8) & 0x1f, // X start on 5 bits
-        (127 / 8) & 0x1f, // X end on 5 bits
+        (               rect.x / 8) & 0x1f, // X start on 5 bits
+        ((rect.x + rect.w - 1) / 8) & 0x1f, // X end on 5 bits
     };
     err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_X, start_end_x, sizeof(start_end_x));
     if (err != ESP_OK)
-        goto defer;
+        return err;
 
     const uint8_t start_end_y[4] = {
-        (  0) & 0xff, // Y start low
-        (  0) >> 8,   // Y start high
-        (295) & 0xff, // Y end low
-        (295) >> 8,   // Y end high
+        (             rect.y) & 0xff, // Y start low
+        (             rect.y) >>   8, // Y start high
+        (rect.y + rect.h - 1) & 0xff, // Y end low
+        (rect.y + rect.h - 1) >>   8, // Y end high
     };
     err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_Y, start_end_y, sizeof(start_end_y));
     if (err != ESP_OK)
         goto defer;
 
-    const uint8_t addr_x = 0/8;
+    const uint8_t addr_x = rect.x / 8;
     err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_X, &addr_x, sizeof(addr_x));
     if (err != ESP_OK)
         goto defer;
 
-    const uint8_t addr_y[2] = { 0 & 0xff, 0 >> 8 };
+    const uint8_t addr_y[2] = { rect.y & 0xff, rect.y >> 8 };
     err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_Y, addr_y, sizeof(addr_y));
-    if (err != ESP_OK)
-        goto defer;
 
-    // Acquire bus required
+    /* Send framebuffer row by row */
+
+    // Acquire bus required to use SPI_TRANS_CS_KEEP_ACTIVE
     err = spi_device_acquire_bus(h->spi, portMAX_DELAY);
     if (err != ESP_OK)
         goto defer;
@@ -334,18 +370,18 @@ esp_err_t ssd1680_test_pattern(ssd1680_handle_t h) {
     if (err != ESP_OK)
         goto defer;
 
-    static uint8_t line[128/8] = { 0 };
+    const size_t row_stride = (h->cfg.cols - 1) / 8 + 1;
     spi_transaction_t payload = {
-        .length = sizeof(line) * 8,
-        .tx_buffer = line,
+        .length = h->cfg.cols,
+        .tx_buffer = h->cfg.framebuffer,
         .user = (void*)DC_DATA(h->cfg.dc_pin),
         .flags = SPI_TRANS_CS_KEEP_ACTIVE
     };
 
-    int row = 0;
-    for (; row < 296; ++row) {
-        memset(line, (row & 2) ? 0xcc : 0x33, sizeof(line));
-        if (row == 296) payload.flags = 0;
+    for (uint16_t row = 0; row < h->cfg.rows; ++row) {
+        payload.tx_buffer = &h->cfg.framebuffer[row * row_stride];
+        if (row + 1 == h->cfg.rows) payload.flags = 0;
+
         err = spi_device_polling_transmit(h->spi, &payload);
         if (err != ESP_OK)
             goto defer;
@@ -379,27 +415,5 @@ esp_err_t ssd1680_full_refresh(ssd1680_handle_t ctx) {
         vTaskDelay(1 / portTICK_PERIOD_MS);
     }
 
-    return err;
-}
-
-esp_err_t ssd1680_deinit(ssd1680_handle_t *ctx) {
-    if ((*ctx)->spi == NULL)
-        return ESP_ERR_INVALID_ARG;
-
-    esp_err_t err;
-
-    /* 6. Power Off
-     *    • Deep sleep by Command 0x10
-     */
-    {
-        const uint8_t deep_sleep_mode = DEEP_SLEEP_MODE_1;
-        err = ssd1680_cmd_write(*ctx, CMD_DeepSleepMode, &deep_sleep_mode, sizeof(deep_sleep_mode));
-    }
-
-    spi_bus_remove_device((*ctx)->spi);
-    (*ctx)->spi = NULL;
-
-    free(*ctx);
-    *ctx = NULL;
     return err;
 }
