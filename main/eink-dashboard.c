@@ -10,6 +10,7 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "ssd1680.h"
+#include "bitui.h"
 
 static const char *TAG = "main";
 
