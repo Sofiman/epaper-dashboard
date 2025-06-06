@@ -29,7 +29,8 @@ void bitui_hline(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
         // ....****
         //     ^  ^
         //     x1 x2
-        uint8_t mask = (((uint8_t)0xff) >> x1_rem) ^ (((uint8_t)0xff) >> x2_rem);
+        // TODO : Xor should also work (and one less op) but I'm not sure at 100%
+        uint8_t mask = (0xff >> x1_rem) & ~(0xff >> x2_rem);
         bitui_colorize(ctx, row_start + x1_aligned, mask);
     } else {
         uint8_t mask = (0xff >> x1_rem);
@@ -42,7 +43,7 @@ void bitui_hline(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
         }
 
         if (x2_rem) {
-            mask = (0xff << (8 - x2_rem));
+            mask = ~(0xff >> x2_rem);
             bitui_colorize(ctx, row_start + x1_aligned, mask);
         }
     }
@@ -53,7 +54,7 @@ void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2)
     assert(y1 <= y2);
 
     const uint8_t col = x / 8;
-    const uint8_t mask = 1 << (7 - (x & 7));
+    const uint8_t mask = 0x80 >> (x & 7);
     const uint16_t w = ctx->width;
 
     for (; y1 <= y2; ++y1) {
