@@ -1,0 +1,12 @@
+menu "Dashboard Configuration"
+config WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Type the Wi-Fi SSID to connect to
+config WIFI_PASSWORD
+        string "Wi-Fi Password"
+        default ""
+        help
+            Type the Wi-Fi Password to connect to
+endmenu

@@ -408,12 +408,15 @@ esp_err_t ssd1680_full_refresh(ssd1680_handle_t ctx) {
     if (err != ESP_OK)
         return err;
 
-    while (!gpio_get_level(ctx->cfg.busy_pin)) {
-        vTaskDelay(1 / portTICK_PERIOD_MS);
-    }
+    return err;
+}
+
+esp_err_t ssd1680_wait_until_idle(ssd1680_handle_t ctx) {
+    if (ctx->spi == NULL)
+        return ESP_ERR_INVALID_ARG;
+
     while (gpio_get_level(ctx->cfg.busy_pin)) {
         vTaskDelay(1 / portTICK_PERIOD_MS);
     }
-
-    return err;
+    return ESP_OK;
 }
