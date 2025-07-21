@@ -25,17 +25,23 @@ static inline void bitui_colorize(bitui_t ctx, uint16_t offset, uint8_t updated_
     ctx->framebuffer[offset] = temp;
 }
 
-void bitui_point(bitui_t ctx, uint16_t x, uint16_t y) {
+bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
     _Static_assert(BITUI_ROT_270 == (BITUI_ROT_090 | BITUI_ROT_180), "Rotation bitwise composition");
     if (ctx->rot & BITUI_ROT_090) {
-        uint16_t t = x;
-        x = ctx->width - 1 - y;
-        y = t;
+        uint16_t t = point.x;
+        point.x = ctx->width - 1 - point.y;
+        point.y = t;
     }
     if (ctx->rot & BITUI_ROT_180) {
-        x = ctx->width - 1 - x;
-        y = ctx->height - 1 - y;
+        point.x = ctx->width - 1 - point.x;
+        point.y = ctx->height - 1 - point.y;
     }
+    return point;
+}
+
+void bitui_point(bitui_t ctx, uint16_t x, uint16_t y) {
+    bitui_point_t p = bitui_apply_rot(ctx, (bitui_point_t){ .x = x, .y = y });
+    x = p.x; y = p.y;
 
     if (x >= ctx->width || y >= ctx->height)
         return;
@@ -101,13 +107,31 @@ void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2)
     }
 }
 
-void bitui_rect(bitui_t ctx, bitui_rect_t rect) {
-    bitui_hline(ctx, rect.y,              rect.x, rect.x + rect.w);
-    bitui_hline(ctx, rect.y + rect.h - 1, rect.x, rect.x + rect.w);
-    if (rect.h > 2) {
-        bitui_vline(ctx, rect.x,          rect.y + 1, rect.y + rect.h - 2);
-        bitui_vline(ctx, rect.x + rect.w - 1, rect.y + 1, rect.y + rect.h - 2);
-    }
+void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
+{
+    bitui_point_t p;
+
+    p = bitui_apply_rot(ctx, (bitui_point_t){ .x = x1, .y = y1 });
+    x1 = p.x; y1 = p.y;
+
+    p = bitui_apply_rot(ctx, (bitui_point_t){ .x = x2, .y = y2 });
+    x2 = p.x; y2 = p.y;
+
+    if (x1 == x2) bitui_vline(ctx, x1, y1, y2);
+    else if (y1 == y2) bitui_hline(ctx, y1, x1, x2);
+    else assert(0 && "Unsupported non axis aligned lines");
+}
+
+void bitui_rect(bitui_t ctx, const bitui_rect_t rect) {
+    const uint16_t left   = rect.x;
+    const uint16_t top    = rect.y;
+    const uint16_t right  = rect.x + rect.w - 1;
+    const uint16_t bottom = rect.y + rect.h - 1;
+
+    bitui_line(ctx,  left,    top, right,    top);
+    bitui_line(ctx,  left,    top,  left, bottom);
+    bitui_line(ctx, right,    top, right, bottom);
+    bitui_line(ctx,  left, bottom, right, bottom);
 }
 
 void bitui_paste_bitstream(bitui_t ctx, const uint8_t *src_bitstream, uint16_t src_w, uint16_t src_h, const uint16_t dst_x, const uint16_t dst_y)

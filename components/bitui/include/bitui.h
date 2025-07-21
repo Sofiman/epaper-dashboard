@@ -5,6 +5,10 @@
 
 typedef struct {
     uint16_t x, y;
+} bitui_point_t;
+
+typedef struct {
+    uint16_t x, y;
     uint16_t w, h;
 } bitui_rect_t;
 
@@ -14,6 +18,7 @@ typedef enum {
     BITUI_ROT_180 = 0x02,
     BITUI_ROT_270 = 0x03,
 } bitui_rot;
+#define BITUI_ROT_INVERT(Rot) ((Rot) ^ BITUI_ROT_270)
 
 typedef struct {
     uint16_t width, height, stride;
@@ -32,6 +37,8 @@ void bitui_hline(bitui_t ctx, uint16_t y, uint16_t x1, uint16_t x2);
 void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2);
 
 void bitui_point(bitui_t ctx, uint16_t x, uint16_t y);
+void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2);
+bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point);
 
 void bitui_rect(bitui_t ctx, bitui_rect_t rect);
 void bitui_rrect(bitui_t ctx, bitui_rect_t rect, bitui_rect_t radius);
