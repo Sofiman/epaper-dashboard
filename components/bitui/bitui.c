@@ -1,5 +1,10 @@
 #include "bitui.h"
 #include <assert.h>
+#include <string.h>
+
+void bitui_clear(bitui_t ctx, bool color) {
+    memset(ctx->framebuffer, color ? 0xff : 0, ctx->stride * ctx->height);
+}
 
 static inline void bitui_merge_rect(bitui_rect_t *dst, const bitui_rect_t src) {
     if (dst->x > src.x) dst->x = src.x;
