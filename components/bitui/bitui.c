@@ -154,3 +154,16 @@ void bitui_paste_bitstream(bitui_t ctx, const uint8_t *src_bitstream, uint16_t s
     }
     ctx->color = !ctx->color;
 }
+
+void bitui_paste_bitmap(bitui_t ctx, const uint8_t *src_bitmap, uint16_t src_w, uint16_t src_h, uint16_t dst_x, uint16_t dst_y)
+{
+    bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = dst_x, .y = dst_y, .w = src_w, .h = src_h });
+    const uint16_t stride = (src_w - 1) /8 + 1;
+
+    for (uint16_t dy = 0; dy < src_h; dy++) {
+        for (uint16_t dx = 0; dx < src_w; dx++) {
+            if (!(src_bitmap[dy * stride + (dx / 8)] & (0x80 >> (dx & 7))))
+                bitui_point(ctx, dst_x + dx, dst_y + dy);
+        }
+    }
+}

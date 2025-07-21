@@ -5,3 +5,6 @@ build/
 sdkconfig
 sdkconfig.old
 tags
+*.o
+a.out
+main
