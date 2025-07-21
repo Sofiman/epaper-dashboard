@@ -2,6 +2,12 @@
 #include <assert.h>
 #include <string.h>
 
+#define SWAP_U16(A,B) do { \
+    uint16_t __tmp = (A); \
+    (A) = (B); \
+    (B) = __tmp; \
+} while (0)
+
 void bitui_clear(bitui_t ctx, bool color) {
     memset(ctx->framebuffer, color ? 0xff : 0, ctx->stride * ctx->height);
 }
@@ -30,13 +36,15 @@ void bitui_point(bitui_t ctx, uint16_t x, uint16_t y) {
         x = ctx->width - 1 - x;
         y = ctx->height - 1 - y;
     }
+
     if (x >= ctx->width || y >= ctx->height)
         return;
     bitui_colorize(ctx, y * ctx->stride + x/8, 0x80 >> (x & 7));
 }
 
 void bitui_hline(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
-    assert(x1 <= x2);
+    if (x1 > x2) SWAP_U16(x1, x2);
+
     bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = x1, .y = y, .w = x2-x1, .h = 1 });
     // [not aligned][aligned][not aligned]
 
@@ -80,7 +88,8 @@ void bitui_hline(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
 
 void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2)
 {
-    assert(y1 <= y2);
+    if (y1 > y2) SWAP_U16(y1, y2);
+
     bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = x, .y = y1, .w = 1, .h = y2-y1 });
 
     const uint8_t col = x / 8;
