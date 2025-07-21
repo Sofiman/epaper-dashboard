@@ -8,5 +8,6 @@ idf_component_register(SRCS "eink-dashboard.c"
                     REQUIRES ssd1680
                     REQUIRES bitui
                     REQUIRES immjson
+                    REQUIRES gui
                       )
 

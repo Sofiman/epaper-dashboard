@@ -19,15 +19,12 @@
 #include "lwip/netdb.h"
 #include "lwip/dns.h"
 
-#define PROGMEM
 #include "immjson.h"
 #include "sdkconfig.h"
-#include "gfxfont.h"
-#include "Blocktopia11pt7b.h"
-#define FONT Blocktopia11pt7b
 #include "esp_log.h"
 #include "ssd1680.h"
 #include "bitui.h"
+#include "gui.h"
 
 static const char *TAG = "main";
 
@@ -43,40 +40,6 @@ static EventGroupHandle_t s_wifi_event_group;
 #define SCREEN_STRIDE ((SCREEN_COLS - 1) / 8 + 1)
 #define SCREEN_ROWS 296
 static uint8_t framebuffer[SCREEN_STRIDE * SCREEN_ROWS];
-
-static void render_text(bitui_t ctx, const GFXfont *font, const char *str, const uint16_t bottom_left_x, const uint16_t bottom_left_y) {
-    uint16_t x = bottom_left_x;
-    uint16_t y = bottom_left_y;
-    for (; *str; ++str) {
-        const char c = *str;
-        if (c == '\n') {
-            x = bottom_left_x;
-            y += font->yAdvance;
-            continue;
-        }
-
-        assert(c >= font->first || c <= font->last);
-        const GFXglyph glyph = font->glyph[c - font->first];
-
-        bitui_paste_bitstream(ctx, font->bitmap + glyph.bitmapOffset, glyph.width, glyph.height, glyph.xOffset + x, y + glyph.yOffset);
-        x += glyph.xAdvance;
-    }
-}
-
-#define FORECAST_DURATION_DAYS 2
-#define FORECAST_HOURLY_POINT_COUNT FORECAST_DURATION_DAYS * 24
-struct Forecast {
-    float latitude;
-    float longitude;
-    uint32_t utc_offset_seconds;
-    const char *timezone_abbreviation;
-    struct Hourly {
-        uint64_t time[FORECAST_HOURLY_POINT_COUNT];
-        float temperature_2m[FORECAST_HOURLY_POINT_COUNT];
-        uint8_t weather_code_2m[FORECAST_HOURLY_POINT_COUNT];
-    } hourly;
-    time_t updated_at;
-};
 
 static void *static_reserve_uint64(void *cursor, size_t i) {
     return i < FORECAST_HOURLY_POINT_COUNT ? ((uint64_t*)cursor) + i : NULL;
@@ -157,7 +120,7 @@ static char *alloc_str_fn(void *user_data, char *oldptr, size_t old_size, size_t
 }
 
 static bool noRetry = false;
-static esp_netif_ip_info_t ip_info;
+static esp_netif_t* netif;
 static int s_retry_num = 0;
 #define MAXIMUM_RETRY 3
 
@@ -179,7 +142,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ip_info = event->ip_info;
+        ESP_UNUSED(event);
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
@@ -192,7 +155,7 @@ void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_netif_init());
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    netif = esp_netif_create_default_wifi_sta();
 
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     esp_netif_sntp_init(&config);
@@ -373,53 +336,7 @@ static void decode_weather(esp_tls_t *tls_session) {
     }
 }
 
-static char temp_str[80];
-
 static void render_weather(void) {
-    const uint64_t timestamp = forecast.updated_at;
-
-    enum {
-        GRAPH_START_X = SCREEN_ROWS - 2 * FORECAST_HOURLY_POINT_COUNT,
-        BAR_START_Y = 6,
-        BAR_MAX_HEIGHT = 48,
-        BAR_MIN_HEIGHT = 2,
-        CURSOR_HEIGHT = 4,
-        CURSOR_PADDING = 2,
-    };
-    size_t cursor = 0;
-    while (cursor < FORECAST_HOURLY_POINT_COUNT && forecast.hourly.time[cursor] < timestamp) ++cursor;
-    if (cursor == FORECAST_HOURLY_POINT_COUNT) return;
-
-    ESP_LOGI(TAG, "Current time : %lu, Closest data point : %lu", (long)timestamp, (long)forecast.hourly.time[cursor]);
-
-    float temp_min = 256.0f;
-    float temp_max = -256.0f;
-    for (size_t i = 0; i < FORECAST_HOURLY_POINT_COUNT; ++i) {
-        if (forecast.hourly.temperature_2m[i] < temp_min) temp_min = forecast.hourly.temperature_2m[i];
-        if (forecast.hourly.temperature_2m[i] > temp_max) temp_max = forecast.hourly.temperature_2m[i];
-    }
-
-    bitui_t ctx = &bitui_handle;
-    ctx->color = false;
-    for (size_t i = 0; i < FORECAST_HOURLY_POINT_COUNT; ++i) {
-        float fill = (forecast.hourly.temperature_2m[i] - temp_min) / (temp_max - temp_min);
-        bitui_hline(ctx, GRAPH_START_X + i*2, BAR_START_Y, BAR_START_Y + BAR_MIN_HEIGHT + (uint16_t)(fill * BAR_MAX_HEIGHT));
-    }
-
-    bitui_point(ctx, GRAPH_START_X + cursor*2 - 1, 127);
-    bitui_point(ctx, GRAPH_START_X + cursor*2 + 1, 127);
-    bitui_hline(ctx, GRAPH_START_X + cursor*2 + 0, 0, CURSOR_HEIGHT);
-
-    uint16_t h = (uint16_t)((forecast.hourly.temperature_2m[cursor] - temp_min) / (temp_max - temp_min) * BAR_MAX_HEIGHT);
-    bitui_point(ctx, GRAPH_START_X + cursor*2 - 1, BAR_START_Y + BAR_MIN_HEIGHT + BAR_MAX_HEIGHT + CURSOR_PADDING + CURSOR_HEIGHT + 4);
-    bitui_point(ctx, GRAPH_START_X + cursor*2 + 1, BAR_START_Y + BAR_MIN_HEIGHT + BAR_MAX_HEIGHT + CURSOR_PADDING + CURSOR_HEIGHT + 4);
-    bitui_hline(ctx, GRAPH_START_X + cursor*2 + 0, BAR_START_Y + BAR_MIN_HEIGHT + h + CURSOR_PADDING, BAR_START_Y + BAR_MIN_HEIGHT + BAR_MAX_HEIGHT + 2 + CURSOR_HEIGHT);
-
-    snprintf(temp_str, sizeof(temp_str), "Now %.1f C\nMin %.1f C\nMax %.1f C", forecast.hourly.temperature_2m[cursor], temp_min, temp_max);
-
-    ctx->color = true;
-    render_text(ctx, &FONT, temp_str, 16, 72);
-
     esp_err_t ret = ssd1680_wait_until_idle(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
     ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
@@ -437,6 +354,9 @@ void app_main(void)
 
     init_devices();
 
+    setenv("TZ", "CEST", 1);
+    tzset();
+
     bitui_handle = (bitui_ctx_t){
         .width = SCREEN_COLS,
         .height = SCREEN_ROWS,
@@ -447,9 +367,6 @@ void app_main(void)
     };
 
     bitui_t ctx = &bitui_handle;
-
-    memset(framebuffer, 0xff, sizeof(framebuffer));
-    render_text(ctx, &FONT, "Connecting to Wi-Fi", 32, 48);
 
     // Clear other pixels, clear the dirty zone
     ctx->dirty = (bitui_rect_t){0};
@@ -465,11 +382,6 @@ void app_main(void)
 
     wifi_init_sta();
 
-    snprintf(temp_str, sizeof(temp_str), "Connected\nIP: " IPSTR "\nSyncing time...", IP2STR(&ip_info.ip));
-
-    memset(framebuffer, 0xff, sizeof(framebuffer));
-    render_text(ctx, &FONT, temp_str, 32, 48);
-
     ret = ssd1680_wait_until_idle(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
     ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
@@ -482,18 +394,6 @@ void app_main(void)
 
     esp_netif_sntp_start();
     ESP_ERROR_CHECK(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000))); // 10s
-
-    time_t now = 0;
-    struct tm timeinfo = { 0 };
-    time(&now);
-
-    setenv("TZ", "CEST", 1);
-    tzset();
-    localtime_r(&now, &timeinfo);
-    strftime(temp_str, sizeof(temp_str), "%A %d %b, %R", &timeinfo);
-
-    memset(framebuffer, 0xff, sizeof(framebuffer));
-    render_text(ctx, &FONT, temp_str, 16, 20);
 
     ret = ssd1680_wait_until_idle(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
