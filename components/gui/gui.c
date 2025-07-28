@@ -5,7 +5,7 @@
 #include <assert.h>
 #include "gfxfont.h"
 #define PROGMEM
-#include "WeatherIcons.h"
+#include "WeatherIcons28.h"
 #include "Thixel16pt7b.h"
 #include "Thixel8pt7b.h"
 #define FONT Thixel16pt7b
@@ -119,41 +119,54 @@ static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 {
     bitui_clear(ctx, true);
 
-        ctx->color = false;
-    bitui_fill_rect(ctx, (bitui_rect_t){ .x = 0, .y = 1, .w = 10, .h = 20 });
-    return;
+    ctx->color = false;
+    //bitui_fill_rect(ctx, (bitui_rect_t){ .x = 0, .y = 1, .w = 10, .h = 20 });
+    //return;
 
     const struct Forecast *forecast = &data->forecast;
     const uint64_t timestamp = forecast->updated_at;
 
     enum {
-        WIDTH = 30,
-        BORDER = 1,
-        PADDING = 1,
-        INSET = BORDER + PADDING,
-        ACTUAL_WIDTH = WIDTH - BORDER * 2,
+        WIDTH = 32,
+        PADDING = 4,
+        START_X = 1,
+        START_Y = 110,
+        OUTLINE_START_Y = START_Y - 8,
     };
 
-    bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = -1, .cursor.y = 10 };
+    bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = 0, .cursor = { .x = START_X, .y = START_Y } };
 
+    ctx->color = true;
     bitui_point_t pos;
+    struct size s;
     for (int i = 0; i < 12; i++) {
         pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = 64 });
-        ctx->color = false;
-        bitui_rect(ctx, (bitui_rect_t){ .x = pos.x, .y = pos.y, .w = WIDTH, .h = 64 });
-
-        //enum WeatherIcon icon = weather_icon_from_wmo_code(forecast->hourly.weather_code_2m[i]);
-        bitui_paste_bitmap(ctx, WEATHER_ICONS[i], WEATHER_ICON_SIZE, WEATHER_ICON_SIZE, pos.x + ACTUAL_WIDTH / 2 - WEATHER_ICON_SIZE / 2, pos.y + INSET);
-
-        ctx->color = true;
-        snprintf(temp_str, sizeof(temp_str), "%.1f", forecast->hourly.temperature_2m[i]);
-        struct size s = measure_text(ctx, &Thixel8pt7b, temp_str);
-        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + PADDING + ACTUAL_WIDTH / 2 - s.w / 2, pos.y + INSET + WEATHER_ICON_SIZE + PADDING + s.h / 2);
 
         snprintf(temp_str, sizeof(temp_str), "%ih", i);
         s = measure_text(ctx, &Thixel8pt7b, temp_str);
-        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + INSET + ACTUAL_WIDTH / 2 - s.w / 2, pos.y + 4);
+        pos.y += s.h/2;
+        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
+
+        //enum WeatherIcon icon = weather_icon_from_wmo_code(forecast->hourly.weather_code_2m[i]);
+        pos.y += PADDING;
+        ctx->color = false;
+        bitui_paste_bitmap(ctx, WEATHER_ICONS[i], WEATHER_ICON_SIZE, WEATHER_ICON_SIZE, pos.x + WIDTH / 2 - WEATHER_ICON_SIZE / 2, pos.y);
+        pos.y += WEATHER_ICON_SIZE;
+
+        ctx->color = true;
+        snprintf(temp_str, sizeof(temp_str), "%.1f", forecast->hourly.temperature_2m[i]);
+        s = measure_text(ctx, &Thixel8pt7b, temp_str);
+        pos.y += PADDING + s.h/2;
+        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
     }
+
+    ctx->color = false;
+    bitui_rect(ctx, (bitui_rect_t){ .x = START_X, .y = OUTLINE_START_Y, .w = SCREEN_ROWS-1-1, .h = SCREEN_COLS-OUTLINE_START_Y });
+
+    s = measure_text(ctx, &Thixel8pt7b, "WEATHER");
+    ctx->color = true;
+    bitui_line(ctx, START_X + PADDING, OUTLINE_START_Y, START_X + PADDING + PADDING / 2 + s.w, OUTLINE_START_Y);
+    render_text(ctx, &Thixel8pt7b, "WEATHER", START_X + PADDING + PADDING / 2, OUTLINE_START_Y + s.h / 4);
 
     /*
     enum {
