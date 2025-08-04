@@ -154,19 +154,20 @@ void bitui_rect(bitui_t ctx, const bitui_rect_t rect) {
 void bitui_paste_bitstream(bitui_t ctx, const uint8_t *src_bitstream, uint16_t src_w, uint16_t src_h, const uint16_t dst_x, const uint16_t dst_y)
 {
     uint8_t bits = 0;
-    uint8_t c = 0;
+    uint8_t bit = 0;
     bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = dst_x, .y = dst_y, .w = src_w, .h = src_h });
 
     ctx->color = !ctx->color;
     for (uint16_t y = dst_y; y < dst_y + src_h; y++) {
         for (uint16_t x = dst_x; x < dst_x + src_w; x++) {
-            if ((c & 7) == 0) bits = src_bitstream[c/8];
+            if (!(bit & 7))
+                bits = *(src_bitstream++);
 
             if (bits & 0x80)
                 bitui_point(ctx, x, y);
 
             bits <<= 1;
-            ++c;
+            ++bit;
         }
     }
     ctx->color = !ctx->color;
