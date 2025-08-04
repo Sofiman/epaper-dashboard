@@ -10,6 +10,8 @@
 #define WIN_HEIGHT SCREEN_COLS
 
 int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
     // SDL init
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         SDL_Log("Unable to initialize SDL: %s", SDL_GetError());
@@ -29,8 +31,7 @@ int main(int argc, char **argv) {
     }
 
     // create renderer
-    SDL_Renderer *renderer = SDL_CreateRenderer(
-        window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, 0);
     if (renderer == NULL) {
         SDL_Log("Unable to create renderer: %s", SDL_GetError());
         return 1;

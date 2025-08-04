@@ -15,6 +15,7 @@ typedef struct {
 
 static void esp_netif_get_ip_info(esp_netif_t *esp_netif, esp_netif_ip_info_t *ip_info)
 {
+    (void) esp_netif;
     ip_info->ip.addr = 0xc0a80069;
 }
 

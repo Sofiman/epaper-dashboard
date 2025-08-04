@@ -44,7 +44,7 @@ struct size {
 #define MIN(A,B) (((A) < (B)) ? (A) : (B))
 #define MAX(A,B) (((A) > (B)) ? (A) : (B))
 
-static struct size measure_text(bitui_t ctx, const GFXfont *font, const char *str) {
+static struct size measure_text(const GFXfont *font, const char *str) {
     struct size s = { .w = 0, .h = 0 };
     if (*str) s.h = font->yAdvance;
 
@@ -89,6 +89,7 @@ static void render_text(bitui_t ctx, const GFXfont *font, const char *str, const
 static char temp_str[80];
 
 static void gui_render_boot(bitui_t ctx, const gui_data_t *data) {
+    (void)data;
     bitui_clear(ctx, true);
     render_text(ctx, &FONT, "Connecting to Wi-Fi", 32, 48);
 }
@@ -104,6 +105,7 @@ static void gui_render_wifi_init(bitui_t ctx, const gui_data_t *data) {
 }
 
 static void gui_render_sync_time(bitui_t ctx, const gui_data_t *data) {
+    (void)data;
     time_t now = 0;
     struct tm timeinfo = { 0 };
     time(&now);
