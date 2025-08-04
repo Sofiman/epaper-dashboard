@@ -13,10 +13,27 @@ void bitui_clear(bitui_t ctx, bool color) {
 }
 
 static inline void bitui_merge_rect(bitui_rect_t *dst, const bitui_rect_t src) {
-    if (dst->x > src.x) dst->x = src.x;
-    if (dst->y > src.y) dst->y = src.y;
-    if (dst->w < src.w) dst->w = src.w;
-    if (dst->h < src.h) dst->h = src.h;
+    if (src.w == 0 || src.h == 0)
+        return;
+    if (dst->w == 0 || dst->h == 0) {
+        *dst = src;
+        return;
+    }
+
+    const uint16_t dst_left   = dst->x;
+    const uint16_t dst_top    = dst->y;
+    const uint16_t dst_right  = dst->x + dst->w - 1;
+    const uint16_t dst_bottom = dst->y + dst->h - 1;
+
+    const uint16_t src_left   = src.x;
+    const uint16_t src_top    = src.y;
+    const uint16_t src_right  = src.x + src.w - 1;
+    const uint16_t src_bottom = src.y + src.h - 1;
+
+    dst->x = dst_left < src_left ? dst_left : src_left;
+    dst->y =  dst_top < src_top  ?  dst_top :  src_top;
+    dst->w = ( dst_right >  src_right ?  dst_right :  src_right) - dst->x + 1;
+    dst->h = (dst_bottom > src_bottom ? dst_bottom : src_bottom) - dst->y + 1;
 }
 
 static inline void bitui_colorize(bitui_t ctx, uint16_t offset, uint8_t updated_pixels_mask) {
