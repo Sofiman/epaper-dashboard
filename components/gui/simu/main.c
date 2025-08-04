@@ -63,6 +63,7 @@ int main(int argc, char **argv) {
     bitui_t ctx = &bitui_handle;
 
     gui_data_t gui_data = {
+        .current_screen = GUI_HOME,
         .forecast = {
             .hourly.temperature_2m = {
                 12.3,

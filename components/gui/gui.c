@@ -5,7 +5,7 @@
 #include <assert.h>
 #include "gfxfont.h"
 #define PROGMEM
-#include "WeatherIcons28.h"
+#include "Meteocons.h"
 #include "Thixel16pt7b.h"
 #include "Thixel8pt7b.h"
 #define FONT Thixel16pt7b
@@ -115,23 +115,41 @@ static void gui_render_sync_time(bitui_t ctx, const gui_data_t *data) {
     render_text(ctx, &FONT, temp_str, 16, 20);
 }
 
+static void draw_widget_outline(bitui_t ctx, bitui_rect_t bbox, const char *label)
+{
+    enum {
+        FONT_HEIGHT = 4,
+        PADDING_V = 6,
+        PADDING_H = 4,
+    };
+
+    bbox.y -= FONT_HEIGHT/2 + PADDING_V;
+    bbox.h += FONT_HEIGHT/2 + PADDING_V;
+    ctx->color = false;
+    bitui_rect(ctx, bbox);
+
+    struct size s = measure_text(&Thixel8pt7b, label);
+    ctx->color = true;
+    bitui_line(ctx, bbox.x + PADDING_H, bbox.y, bbox.x + PADDING_H + PADDING_H / 2 + s.w, bbox.y);
+    render_text(ctx, &Thixel8pt7b, label, bbox.x + PADDING_H + PADDING_H / 2, bbox.y + s.h / 4);
+}
+
 static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 {
     bitui_clear(ctx, true);
 
     ctx->color = false;
-    //bitui_fill_rect(ctx, (bitui_rect_t){ .x = 0, .y = 1, .w = 10, .h = 20 });
-    //return;
 
     const struct Forecast *forecast = &data->forecast;
     const uint64_t timestamp = forecast->updated_at;
 
     enum {
-        WIDTH = 32,
+        WIDTH = 29,
+        HEIGHT = 64,
         PADDING = 4,
-        START_X = 1,
-        START_Y = 110,
-        OUTLINE_START_Y = START_Y - 8,
+        HOURS_DISPLAYED = (SCREEN_ROWS/WIDTH),
+        START_X = SCREEN_ROWS / 2 - HOURS_DISPLAYED*WIDTH/2,
+        START_Y = 116,
     };
 
     bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = 0, .cursor = { .x = START_X, .y = START_Y } };
@@ -139,83 +157,32 @@ static void gui_render_home(bitui_t ctx, const gui_data_t *data)
     ctx->color = true;
     bitui_point_t pos;
     struct size s;
-    for (int i = 0; i < 12; i++) {
-        pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = 64 });
+    for (int i = 0; i < HOURS_DISPLAYED; i++) {
+        pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = HEIGHT });
 
         snprintf(temp_str, sizeof(temp_str), "%ih", i);
-        s = measure_text(ctx, &Thixel8pt7b, temp_str);
+        s = measure_text(&Thixel8pt7b, temp_str);
         pos.y += s.h/2;
         render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
 
-        //enum WeatherIcon icon = weather_icon_from_wmo_code(forecast->hourly.weather_code_2m[i]);
         pos.y += PADDING;
-        ctx->color = false;
-        bitui_paste_bitmap(ctx, WEATHER_ICONS[i], WEATHER_ICON_SIZE, WEATHER_ICON_SIZE, pos.x + WIDTH / 2 - WEATHER_ICON_SIZE / 2, pos.y);
-        pos.y += WEATHER_ICON_SIZE;
+        pos.y += Meteocons.yAdvance;
+        const enum Meteocon icon = meteocon_from_wmo_code(forecast->hourly.weather_code_2m[i], METEOCON_SUNRISE);
+        const GFXglyph glyph = Meteocons.glyph[icon];
+        bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
 
-        ctx->color = true;
         snprintf(temp_str, sizeof(temp_str), "%.1f", forecast->hourly.temperature_2m[i]);
-        s = measure_text(ctx, &Thixel8pt7b, temp_str);
+        s = measure_text(&Thixel8pt7b, temp_str);
         pos.y += PADDING + s.h/2;
         render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
     }
-
-    ctx->color = false;
-    bitui_rect(ctx, (bitui_rect_t){ .x = START_X, .y = OUTLINE_START_Y, .w = SCREEN_ROWS-1-1, .h = SCREEN_COLS-OUTLINE_START_Y });
-
-    s = measure_text(ctx, &Thixel8pt7b, "WEATHER");
-    ctx->color = true;
-    bitui_line(ctx, START_X + PADDING, OUTLINE_START_Y, START_X + PADDING + PADDING / 2 + s.w, OUTLINE_START_Y);
-    render_text(ctx, &Thixel8pt7b, "WEATHER", START_X + PADDING + PADDING / 2, OUTLINE_START_Y + s.h / 4);
-
-    /*
-    enum {
-        GRAPH_START_X = SCREEN_ROWS - 2 * FORECAST_HOURLY_POINT_COUNT,
-        BAR_START_Y = 6,
-        BAR_MAX_HEIGHT = 48,
-        BAR_MIN_HEIGHT = 2,
-        CURSOR_HEIGHT = 4,
-        CURSOR_PADDING = 2,
-    };
-    size_t cursor = 0;
-    while (cursor < FORECAST_HOURLY_POINT_COUNT && forecast->hourly.time[cursor] < timestamp) ++cursor;
-    if (cursor == FORECAST_HOURLY_POINT_COUNT) return;
-
-    ESP_LOGI(TAG, "Current time : %lu, Closest data point : %lu", (long)timestamp, (long)forecast->hourly.time[cursor]);
-
-    float temp_min = 256.0f;
-    float temp_max = -256.0f;
-    for (size_t i = 0; i < FORECAST_HOURLY_POINT_COUNT; ++i) {
-        if (forecast->hourly.temperature_2m[i] < temp_min) temp_min = forecast->hourly.temperature_2m[i];
-        if (forecast->hourly.temperature_2m[i] > temp_max) temp_max = forecast->hourly.temperature_2m[i];
-    }
-
-    ctx->color = false;
-    for (size_t i = 0; i < FORECAST_HOURLY_POINT_COUNT; ++i) {
-        float fill = (forecast->hourly.temperature_2m[i] - temp_min) / (temp_max - temp_min);
-        bitui_hline(ctx, GRAPH_START_X + i*2, BAR_START_Y, BAR_START_Y + BAR_MIN_HEIGHT + (uint16_t)(fill * BAR_MAX_HEIGHT));
-    }
-
-    bitui_point(ctx, GRAPH_START_X + cursor*2 - 1, 127);
-    bitui_point(ctx, GRAPH_START_X + cursor*2 + 1, 127);
-    bitui_hline(ctx, GRAPH_START_X + cursor*2 + 0, 0, CURSOR_HEIGHT);
-
-    uint16_t h = (uint16_t)((forecast->hourly.temperature_2m[cursor] - temp_min) / (temp_max - temp_min) * BAR_MAX_HEIGHT);
-    bitui_point(ctx, GRAPH_START_X + cursor*2 - 1, BAR_START_Y + BAR_MIN_HEIGHT + BAR_MAX_HEIGHT + CURSOR_PADDING + CURSOR_HEIGHT + 4);
-    bitui_point(ctx, GRAPH_START_X + cursor*2 + 1, BAR_START_Y + BAR_MIN_HEIGHT + BAR_MAX_HEIGHT + CURSOR_PADDING + CURSOR_HEIGHT + 4);
-    bitui_hline(ctx, GRAPH_START_X + cursor*2 + 0, BAR_START_Y + BAR_MIN_HEIGHT + h + CURSOR_PADDING, BAR_START_Y + BAR_MIN_HEIGHT + BAR_MAX_HEIGHT + 2 + CURSOR_HEIGHT);
-
-    snprintf(temp_str, sizeof(temp_str), "Now %.1f C\nMin %.1f C\nMax %.1f C", forecast->hourly.temperature_2m[cursor], temp_min, temp_max);
-
-    ctx->color = true;
-    render_text(ctx, &FONT, temp_str, 16, 72);
-    */
+    draw_widget_outline(ctx, (bitui_rect_t){ .x = 1, .y = START_Y, .w = SCREEN_ROWS - 2, .h = SCREEN_COLS-1-START_Y }, "WEATHER");
 }
 
 typedef void (*gui_screeen_renderer_t)(bitui_t ctx, const gui_data_t *data);
 
 const gui_screeen_renderer_t GUI_SCREEN_RENDERERERS[GUI_COUNT] = {
-    [GUI_BOOT] = gui_render_home,
+    [GUI_BOOT] = gui_render_boot,
     [GUI_WIFI_INIT] = gui_render_wifi_init,
     [GUI_SYNC_TIME] = gui_render_sync_time,
     [GUI_HOME] = gui_render_home,
