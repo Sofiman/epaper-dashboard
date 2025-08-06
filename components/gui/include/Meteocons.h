@@ -149,14 +149,7 @@ const GFXfont Meteocons PROGMEM = {
     22
 };
 
-enum MeteoconTime {
-    METEOCON_DAY,
-    METEOCON_SUNRISE,
-    METEOCON_NIGHT,
-    METEOCON_SUNSET,
-};
-
-static enum Meteocon meteocon_from_wmo_code(int wmo_code, enum MeteoconTime time) {
+static enum Meteocon meteocon_from_wmo_code(int wmo_code, int is_day) {
     /*
      * Relevant documentations:
      * - https://gist.github.com/stellasphere/9490c195ed2b53c707087c8c2db4ec0c
@@ -165,23 +158,9 @@ static enum Meteocon meteocon_from_wmo_code(int wmo_code, enum MeteoconTime time
     switch (wmo_code) {
     case 0: // Clear sky
     case 1: // Mainly Clear
-        switch (time) {
-        case METEOCON_DAY:
-            return METEOCON_SUN;
-        case METEOCON_SUNRISE:
-        case METEOCON_SUNSET:
-            return METEOCON_SUNSET_SUNRISE;
-        case METEOCON_NIGHT:
-            return METEOCON_MOON;
-        default:
-            break;
-        }
-        return METEOCON_SUN;
+        return is_day ? METEOCON_SUN : METEOCON_MOON;
     case 2: // Partly Cloudy
-        _Static_assert(METEOCON_DAY < METEOCON_NIGHT
-                && METEOCON_SUNRISE < METEOCON_NIGHT
-                && METEOCON_SUNSET > METEOCON_NIGHT);
-        return time < METEOCON_NIGHT ? METEOCON_CLOUD_SUN : METEOCON_CLOUD_MOON;
+        return is_day ? METEOCON_CLOUD_SUN : METEOCON_CLOUD_MOON;
     case 3: // Cloudy
         return METEOCON_CLOUD;
     case 45: case 48: return METEOCON_FOG_SUN; // Foggy -- Rime Fog

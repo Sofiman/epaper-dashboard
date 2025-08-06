@@ -16,13 +16,22 @@ struct Forecast {
     float longitude;
     uint32_t utc_offset_seconds;
     const char *timezone_abbreviation;
-    struct Hourly {
-        uint64_t time[FORECAST_HOURLY_POINT_COUNT];
+    struct ForecastHourly {
+        // Unix time is signed
+        int64_t time[FORECAST_HOURLY_POINT_COUNT];
         float temperature_2m[FORECAST_HOURLY_POINT_COUNT];
-        uint8_t weather_code_2m[FORECAST_HOURLY_POINT_COUNT];
+        uint8_t weather_code[FORECAST_HOURLY_POINT_COUNT];
     } hourly;
+    struct ForecastDaily {
+        // Unix time is signed
+        int64_t time[FORECAST_DURATION_DAYS];
+        uint64_t sunrise[FORECAST_DURATION_DAYS];
+        uint64_t sunset[FORECAST_DURATION_DAYS];
+    } daily;
     time_t updated_at;
 };
+_Static_assert(sizeof(((struct Forecast*)NULL)->hourly.time[0]) == sizeof(time_t));
+_Static_assert(sizeof(((struct Forecast*)NULL)->daily.time[0]) == sizeof(time_t));
 
 typedef enum {
     GUI_BOOT = 0,

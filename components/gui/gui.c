@@ -6,9 +6,9 @@
 #include "gfxfont.h"
 #define PROGMEM
 #include "Meteocons.h"
-#include "Thixel16pt7b.h"
+#include "DigitalDisco12pt7b.h"
 #include "Thixel8pt7b.h"
-#define FONT Thixel16pt7b
+#define FONT DigitalDisco12pt7b
 
 typedef enum : uint16_t {
     LAYOUT_HORIZONTAL,
@@ -136,49 +136,142 @@ static void draw_widget_outline(bitui_t ctx, bitui_rect_t bbox, const char *labe
     render_text(ctx, &Thixel8pt7b, label, bbox.x + PADDING_H + PADDING_H / 2, bbox.y + s.h / 4);
 }
 
+static size_t find_closest(const int64_t *haystack, size_t count, int64_t needle) {
+    // TODO: binary search
+    size_t i = 0;
+    while (i < count && haystack[i] < needle) {
+        ++i;
+    }
+    return i;
+}
+
+static bool is_day(const struct Forecast *forecast, int64_t now, int64_t *sun_event_time) {
+    const size_t cur_day = find_closest(forecast->daily.time, FORECAST_DURATION_DAYS - 1, now);
+
+    // TODO: type signness mismatch
+    const int64_t diff_sunrise = now - forecast->daily.sunrise[cur_day];
+    const int64_t  diff_sunset = now - forecast->daily.sunset [cur_day];
+
+    // In the following ASCII art:
+    // - The sign of diff_sunrise is to the left, and diff_sunset, to the right.
+    // - `.*^` represents sunrise, and `^*.`, sunset.
+    //
+    // NIGHTNIGHT  .*^  DAYDAYDAYDAYDAY  ^*.  NIGHTNIGHT
+    //     --      0-         +-         +0       ++
+    //             ^^^^^^^^^^^^^^^^^^^^
+    //                   is_day=1
+    // Note that during the day, both substractions have opposite signs.
+    const bool is_day = (diff_sunrise ^ diff_sunset) < 0;
+    if (sun_event_time)
+        *sun_event_time = is_day ? forecast->daily.sunrise[cur_day]
+            : forecast->daily.sunset[cur_day];
+    return is_day;
+}
+
+static void widget_weather(bitui_t ctx, const gui_data_t *data)
+{
+    const struct Forecast *forecast = &data->forecast;
+
+    enum {
+        WIDTH = 29,
+        HEIGHT = 52,
+        PADDING = 4,
+        HOURS_DISPLAYED = SCREEN_ROWS / WIDTH,
+        START_X = SCREEN_ROWS / 2 - HOURS_DISPLAYED*WIDTH/2,
+        START_Y = 116,
+        LABEL_INTERVAL = 2,
+    };
+
+    bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = 0, .cursor = { .x = START_X, .y = START_Y } };
+
+    time_t now = time(NULL);
+    _Static_assert(FORECAST_HOURLY_POINT_COUNT >= HOURS_DISPLAYED);
+    size_t cur_hour = find_closest(forecast->hourly.time, FORECAST_HOURLY_POINT_COUNT - HOURS_DISPLAYED, now) + 1;
+    // TODO: possible overflow with +1
+
+    // Calculate the label offset to prevent overlapping text when displaying
+    // the exact sunrise/sunset hours.
+    int hour_label_offset = 0;
+    int prev_is_day = is_day(forecast, forecast->hourly.time[cur_hour], NULL);
+    for (size_t i = 0; i < HOURS_DISPLAYED; i++) {
+        now = forecast->hourly.time[cur_hour + i];
+        int cur_is_day = is_day(forecast, forecast->hourly.time[cur_hour + i], NULL);
+        if (prev_is_day ^ cur_is_day) {
+            hour_label_offset = LABEL_INTERVAL - i % LABEL_INTERVAL;
+            break;
+        }
+
+        prev_is_day = cur_is_day;
+    }
+
+    ctx->color = true;
+    bitui_point_t pos;
+    struct size s;
+    struct tm timeinfo = { 0 };
+    prev_is_day = is_day(forecast, forecast->hourly.time[cur_hour], NULL);
+    for (int i = 0; i < HOURS_DISPLAYED; i++, cur_hour++) {
+        int cur_is_day = is_day(forecast, forecast->hourly.time[cur_hour], &now);
+        if (cur_is_day ^ prev_is_day) {
+            strftime(temp_str, sizeof(temp_str), "%H:%M", localtime_r(&now, &timeinfo));
+
+            pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = HEIGHT });
+            s = measure_text(&Thixel8pt7b, temp_str);
+            pos.y += s.h/2;
+            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
+
+            pos.y += PADDING;
+            pos.y += Meteocons.yAdvance;
+            const GFXglyph glyph = Meteocons.glyph[METEOCON_SUNSET_SUNRISE];
+            bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
+
+            i++;
+        }
+        prev_is_day = cur_is_day;
+
+        pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = HEIGHT });
+
+        pos.y += Thixel8pt7b.yAdvance/2;
+        if ((i + hour_label_offset) % LABEL_INTERVAL == 0) {
+            now = forecast->hourly.time[cur_hour];
+            strftime(temp_str, sizeof(temp_str), "%H:00", localtime_r(&now, &timeinfo));
+            s = measure_text(&Thixel8pt7b, temp_str);
+            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
+        }
+
+        pos.y += PADDING + Meteocons.yAdvance;
+        const enum Meteocon icon = meteocon_from_wmo_code(forecast->hourly.weather_code[cur_hour], cur_is_day);
+        const GFXglyph glyph = Meteocons.glyph[icon];
+        bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
+
+        snprintf(temp_str, sizeof(temp_str), "%.1f", forecast->hourly.temperature_2m[cur_hour]);
+        s = measure_text(&Thixel8pt7b, temp_str);
+        pos.y += PADDING + s.h/2;
+        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
+    }
+    draw_widget_outline(ctx, (bitui_rect_t){ .x = 1, .y = START_Y, .w = SCREEN_ROWS - 2, .h = SCREEN_COLS-1-START_Y }, "WEATHER");
+}
+
+static void widget_time(bitui_t ctx, const gui_data_t *data)
+{
+    time_t now = 0;
+    struct tm timeinfo = { 0 };
+    time(&now);
+
+    localtime_r(&now, &timeinfo);
+    strftime(temp_str, sizeof(temp_str), "%R", &timeinfo);
+
+    struct size s = measure_text(&DigitalDisco12pt7b, temp_str);
+    render_text(ctx, &DigitalDisco12pt7b, temp_str, 10, s.h);
+}
+
 static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 {
     bitui_clear(ctx, true);
 
     ctx->color = false;
 
-    const struct Forecast *forecast = &data->forecast;
-    const uint64_t timestamp = forecast->updated_at;
-
-    enum {
-        WIDTH = 29,
-        HEIGHT = 64,
-        PADDING = 4,
-        HOURS_DISPLAYED = (SCREEN_ROWS/WIDTH),
-        START_X = SCREEN_ROWS / 2 - HOURS_DISPLAYED*WIDTH/2,
-        START_Y = 116,
-    };
-
-    bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = 0, .cursor = { .x = START_X, .y = START_Y } };
-
-    ctx->color = true;
-    bitui_point_t pos;
-    struct size s;
-    for (int i = 0; i < HOURS_DISPLAYED; i++) {
-        pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = HEIGHT });
-
-        snprintf(temp_str, sizeof(temp_str), "%ih", i);
-        s = measure_text(&Thixel8pt7b, temp_str);
-        pos.y += s.h/2;
-        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
-
-        pos.y += PADDING;
-        pos.y += Meteocons.yAdvance;
-        const enum Meteocon icon = meteocon_from_wmo_code(forecast->hourly.weather_code_2m[i], METEOCON_SUNRISE);
-        const GFXglyph glyph = Meteocons.glyph[icon];
-        bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
-
-        snprintf(temp_str, sizeof(temp_str), "%.1f", forecast->hourly.temperature_2m[i]);
-        s = measure_text(&Thixel8pt7b, temp_str);
-        pos.y += PADDING + s.h/2;
-        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
-    }
-    draw_widget_outline(ctx, (bitui_rect_t){ .x = 1, .y = START_Y, .w = SCREEN_ROWS - 2, .h = SCREEN_COLS-1-START_Y }, "WEATHER");
+    widget_weather(ctx, data);
+    widget_time(ctx, data);
 }
 
 typedef void (*gui_screeen_renderer_t)(bitui_t ctx, const gui_data_t *data);

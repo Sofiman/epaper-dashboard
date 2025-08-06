@@ -255,7 +255,7 @@ static bitui_ctx_t bitui_handle;
 
 #define WEATHER_WEB_SERVER "api.open-meteo.com"
 #define WEATHER_WEB_PORT "443"
-#define WEATHER_WEB_PATH "/v1/forecast?latitude=48.753899&longitude=2.297500&hourly=temperature_2m,weather_code&timezone=Europe%2FLondon&forecast_days=" str(FORECAST_DURATION_DAYS) "&timeformat=unixtime"
+#define WEATHER_WEB_PATH "/v1/forecast?latitude=48.753899&longitude=2.297500&hourly=temperature_2m,weather_code&daily=sunrise,sunset&timezone=Europe%2FLondon&forecast_days=" str(FORECAST_DURATION_DAYS) "&timeformat=unixtime"
 #define WEATHER_WEB_URL "https://" WEATHER_WEB_SERVER WEATHER_WEB_PATH
 
 static const char *WEATHER_REQUEST = "GET " WEATHER_WEB_PATH " HTTP/1.0\r\n"
