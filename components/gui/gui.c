@@ -8,6 +8,7 @@
 #include "Meteocons.h"
 #include "DigitalDisco12pt7b.h"
 #include "Thixel8pt7b.h"
+#include "Icons.h"
 #define FONT DigitalDisco12pt7b
 
 typedef enum : uint16_t {
@@ -182,6 +183,27 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         LABEL_INTERVAL = 2,
     };
 
+    ctx->color = true;
+    draw_widget_outline(ctx, (bitui_rect_t){ .x = 1, .y = START_Y, .w = SCREEN_ROWS - 2, .h = SCREEN_COLS-1-START_Y }, "WEATHER");
+
+    struct size s;
+    if (forecast->updated_at <= 0) {
+        const bool is_error = forecast->updated_at < 0;
+        const char *status = "loading";
+        if (is_error) {
+            snprintf(temp_str, sizeof(temp_str), "E%lx", -forecast->updated_at);
+            status = temp_str;
+        }
+
+        s = measure_text(&Thixel8pt7b, status);
+        uint16_t start_y = START_Y + HEIGHT / 2 - (17 + PADDING * 3 + s.h/2) / 2;
+        render_text(ctx, &Thixel8pt7b, status, SCREEN_ROWS / 2 - s.w / 2, start_y + 17 + PADDING * 3);
+
+        const GFXglyph glyph = Icons.glyph[is_error ? ICON_WARNING : (ICON_HOURGLASS_FILLED_20 + data->tick % 5)];
+        bitui_paste_bitstream(ctx, Icons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, SCREEN_ROWS / 2 - (glyph.xOffset + glyph.width) / 2, start_y);
+        return;
+    }
+
     bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = 0, .cursor = { .x = START_X, .y = START_Y } };
 
     time_t now = time(NULL);
@@ -204,9 +226,7 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         prev_is_day = cur_is_day;
     }
 
-    ctx->color = true;
     bitui_point_t pos;
-    struct size s;
     struct tm timeinfo = { 0 };
     prev_is_day = is_day(forecast, forecast->hourly.time[cur_hour], NULL);
     for (int i = 0; i < HOURS_DISPLAYED; i++, cur_hour++) {
@@ -248,7 +268,6 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         pos.y += PADDING + s.h/2;
         render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
     }
-    draw_widget_outline(ctx, (bitui_rect_t){ .x = 1, .y = START_Y, .w = SCREEN_ROWS - 2, .h = SCREEN_COLS-1-START_Y }, "WEATHER");
 }
 
 static void widget_time(bitui_t ctx, const gui_data_t *data)

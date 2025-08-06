@@ -15,7 +15,6 @@ struct Forecast {
     float latitude;
     float longitude;
     uint32_t utc_offset_seconds;
-    const char *timezone_abbreviation;
     struct ForecastHourly {
         // Unix time is signed
         int64_t time[FORECAST_HOURLY_POINT_COUNT];
@@ -43,8 +42,10 @@ typedef enum {
 
 typedef struct {
     gui_screen_t current_screen;
-    const struct Forecast forecast;
+    struct Forecast forecast;
     esp_netif_t* netif;
+
+    uint32_t tick;
 } gui_data_t;
 
 void gui_render(bitui_t ctx, const gui_data_t *data);

@@ -58,11 +58,11 @@ static gui_data_t gui_data = {
             .sunrise = {1754368192,1754454675},
             .sunset = {1754421789,1754508092}
         }
-    }
+    },
 };
 
-void render_copy(SDL_Texture *texture) {
-    hotreload_load_symbols();
+void render_copy(SDL_Texture *texture, bool reload) {
+    if (reload) hotreload_load_symbols();
     dyn_gui_render(ctx, &gui_data);
 
     // update texture with new data
@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
 
     ctx = &bitui_handle;
 
-    render_copy(texture);
+    render_copy(texture, true);
 
     // main loop
     bool should_quit = false;
@@ -155,15 +155,23 @@ int main(int argc, char **argv) {
             if (e.type == SDL_QUIT) {
                 should_quit = true;
             } else if (e.type == SDL_KEYDOWN) {
-                if (e.key.keysym.scancode == SDL_SCANCODE_R) {
+                if (e.key.keysym.scancode == SDL_SCANCODE_H) {
                     should_hotreload = 1;
+                } else if (e.key.keysym.scancode == SDL_SCANCODE_G) {
+                    gui_data.tick++;
+                    if (gui_data.tick == 8) gui_data.forecast.updated_at = time(NULL);
+                    render_copy(texture, false);
+                } else if (e.key.keysym.scancode == SDL_SCANCODE_R) {
+                    gui_data.tick = 0;
+                    gui_data.forecast.updated_at = 0;
+                    render_copy(texture, false);
                 }
             }
         }
 
         if (should_hotreload) {
             should_hotreload = 0;
-            render_copy(texture);
+            render_copy(texture, true);
         }
 
         // render on screen
