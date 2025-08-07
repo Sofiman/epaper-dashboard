@@ -284,6 +284,55 @@ static void widget_time(bitui_t ctx, const gui_data_t *data)
     render_text(ctx, &DigitalDisco12pt7b, temp_str, 10, s.h);
 }
 
+#include <math.h>
+static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
+{
+    enum {
+        MARGIN = 2,
+        WIDTH = (SCREEN_ROWS - 2 * MARGIN) / 3,
+        HEIGHT = 44,
+        START_Y = 58,
+        USABLE_HEIGHT = 32,
+    };
+
+    uint16_t start_x = i * (MARGIN + WIDTH) + 1;
+
+    ctx->color = true;
+    draw_widget_outline(ctx, (bitui_rect_t){ .x = start_x, .y = START_Y, .w = WIDTH, .h = HEIGHT }, label);
+
+    struct size s;
+    s = measure_text(&Thixel8pt7b, unit);
+    render_text(ctx, &Thixel8pt7b, unit, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
+
+    const int error = 1;
+    if (error < 0) {
+        tmp_sprintf("E%x", -error);
+
+        s = measure_text(&Thixel8pt7b, temp_str);
+        uint16_t start_y = START_Y + HEIGHT / 2 + MARGIN - (17 + MARGIN + s.h/2) / 2;
+        render_text(ctx, &Thixel8pt7b, temp_str, start_x + WIDTH / 2 - s.w/2, start_y + 17 + MARGIN + s.h/2);
+
+        const GFXglyph glyph = Icons.glyph[ICON_WARNING];
+        bitui_paste_bitstream(ctx, Icons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, start_x + WIDTH/2 - 17/2, start_y);
+        return;
+    }
+
+    if (error == 0) {
+        s = measure_text(&Thixel8pt7b, "no history");
+        render_text(ctx, &Thixel8pt7b, "no history", start_x + WIDTH / 2 - s.w / 2, START_Y + HEIGHT / 2 - MARGIN + s.h/2);
+        return;
+    }
+
+    ctx->color = false;
+    for (int i = 4; i < WIDTH - 4; i += 4) {
+        float p = (1.0f + cosf(start_x + 2 * M_PI * i/100))/2.0f;
+        uint16_t bar_height = (USABLE_HEIGHT - 2) * p + 2;
+        bitui_line(ctx, start_x + i    , START_Y + HEIGHT - MARGIN, start_x + i    , START_Y + HEIGHT - MARGIN - bar_height);
+        bitui_line(ctx, start_x + i + 1, START_Y + HEIGHT - MARGIN, start_x + i + 1, START_Y + HEIGHT - MARGIN - bar_height);
+    }
+
+}
+
 static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 {
     bitui_clear(ctx, true);
@@ -292,6 +341,9 @@ static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 
     widget_weather(ctx, data);
     widget_time(ctx, data);
+    widget_temp(ctx, 0, "TEMP", "26.3 °C");
+    widget_temp(ctx, 1, "RH", "29.4 %");
+    widget_temp(ctx, 2, "CO2", "1587 ppm");
 }
 
 typedef void (*gui_screeen_renderer_t)(bitui_t ctx, const gui_data_t *data);
