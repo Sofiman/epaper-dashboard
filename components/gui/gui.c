@@ -88,6 +88,7 @@ static void render_text(bitui_t ctx, const GFXfont *font, const char *str, const
 }
 
 static char temp_str[80];
+#define tmp_sprintf(...) snprintf(temp_str, sizeof(temp_str), __VA_ARGS__)
 
 static void gui_render_boot(bitui_t ctx, const gui_data_t *data) {
     (void)data;
@@ -174,11 +175,11 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
     const struct Forecast *forecast = &data->forecast;
 
     enum {
-        WIDTH = 29,
-        HEIGHT = 52,
+        COL_WIDTH = 29,
+        COL_HEIGHT = 52,
         PADDING = 4,
-        HOURS_DISPLAYED = SCREEN_ROWS / WIDTH,
-        START_X = SCREEN_ROWS / 2 - HOURS_DISPLAYED*WIDTH/2,
+        HOURS_DISPLAYED = SCREEN_ROWS / COL_WIDTH,
+        START_X = SCREEN_ROWS / 2 - HOURS_DISPLAYED*COL_WIDTH/2,
         START_Y = 116,
         LABEL_INTERVAL = 2,
     };
@@ -196,7 +197,7 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         }
 
         s = measure_text(&Thixel8pt7b, status);
-        uint16_t start_y = START_Y + HEIGHT / 2 - (17 + PADDING * 3 + s.h/2) / 2;
+        uint16_t start_y = START_Y + COL_HEIGHT / 2 - (17 + PADDING * 3 + s.h/2) / 2;
         render_text(ctx, &Thixel8pt7b, status, SCREEN_ROWS / 2 - s.w / 2, start_y + 17 + PADDING * 3);
 
         const GFXglyph glyph = Icons.glyph[is_error ? ICON_WARNING : (ICON_HOURGLASS_FILLED_20 + data->tick % 5)];
@@ -234,39 +235,39 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         if (cur_is_day ^ prev_is_day) {
             strftime(temp_str, sizeof(temp_str), "%H:%M", localtime_r(&now, &timeinfo));
 
-            pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = HEIGHT });
+            pos = bitlayout_element(&list, (bitui_point_t) { .x = COL_WIDTH, .y = COL_HEIGHT });
             s = measure_text(&Thixel8pt7b, temp_str);
             pos.y += s.h/2;
-            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
+            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
 
             pos.y += PADDING;
             pos.y += Meteocons.yAdvance;
             const GFXglyph glyph = Meteocons.glyph[METEOCON_SUNSET_SUNRISE];
-            bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
+            bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + COL_WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
 
             i++;
         }
         prev_is_day = cur_is_day;
 
-        pos = bitlayout_element(&list, (bitui_point_t) { .x = WIDTH, .y = HEIGHT });
+        pos = bitlayout_element(&list, (bitui_point_t) { .x = COL_WIDTH, .y = COL_HEIGHT });
 
         pos.y += Thixel8pt7b.yAdvance/2;
         if ((i + hour_label_offset) % LABEL_INTERVAL == 0) {
             now = forecast->hourly.time[cur_hour];
             strftime(temp_str, sizeof(temp_str), "%H:00", localtime_r(&now, &timeinfo));
             s = measure_text(&Thixel8pt7b, temp_str);
-            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
+            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
         }
 
         pos.y += PADDING + Meteocons.yAdvance;
         const enum Meteocon icon = meteocon_from_wmo_code(forecast->hourly.weather_code[cur_hour], cur_is_day);
         const GFXglyph glyph = Meteocons.glyph[icon];
-        bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
+        bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + COL_WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
 
         snprintf(temp_str, sizeof(temp_str), "%.1f", forecast->hourly.temperature_2m[cur_hour]);
         s = measure_text(&Thixel8pt7b, temp_str);
         pos.y += PADDING + s.h/2;
-        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + WIDTH / 2 - s.w / 2, pos.y);
+        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
     }
 }
 
