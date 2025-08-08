@@ -1,6 +1,6 @@
 CFLAGS=-Wall -Wextra -g -fsanitize=address -fsanitize=undefined $(shell pkg-config --cflags sdl2) -O0 -fPIC
 CPPFLAGS=-I../include -I../../bitui/include -I.
-LDFLAGS=$(shell pkg-config --libs sdl2) -fsanitize=address -fsanitize=undefined
+LDFLAGS=$(shell pkg-config --libs sdl2) -fsanitize=address -fsanitize=undefined -lm
 
 all: main libgui.so
 
