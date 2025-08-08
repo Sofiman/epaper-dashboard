@@ -14,7 +14,6 @@
 struct Forecast {
     float latitude;
     float longitude;
-    uint32_t utc_offset_seconds;
     struct ForecastHourly {
         // Unix time is signed
         int64_t time[FORECAST_HOURLY_POINT_COUNT];
@@ -24,28 +23,43 @@ struct Forecast {
     struct ForecastDaily {
         // Unix time is signed
         int64_t time[FORECAST_DURATION_DAYS];
-        uint64_t sunrise[FORECAST_DURATION_DAYS];
-        uint64_t sunset[FORECAST_DURATION_DAYS];
+        int64_t sunrise[FORECAST_DURATION_DAYS];
+        int64_t sunset[FORECAST_DURATION_DAYS];
     } daily;
     time_t updated_at;
 };
 _Static_assert(sizeof(((struct Forecast*)NULL)->hourly.time[0]) == sizeof(time_t));
 _Static_assert(sizeof(((struct Forecast*)NULL)->daily.time[0]) == sizeof(time_t));
 
+#define RingBuf(T) struct { \
+    T* items; \
+    size_t capacity; \
+    size_t start, end; \
+}
+
+typedef RingBuf(uint16_t) TempData;
+typedef RingBuf(uint16_t) RelHumData;
+typedef RingBuf(uint16_t) CO2Data;
+
 typedef enum {
     GUI_BOOT = 0,
     GUI_WIFI_INIT,
-    GUI_SYNC_TIME,
     GUI_HOME,
     GUI_COUNT
 } gui_screen_t;
 
 typedef struct {
     gui_screen_t current_screen;
-    struct Forecast forecast;
+    uint32_t tick;
+
+    // Boot screen
     esp_netif_t* netif;
 
-    uint32_t tick;
+    // Home screen
+    struct Forecast forecast;
+    const TempData *temp_data;
+    const RelHumData *rel_hum_data;
+    const CO2Data *co2_data;
 } gui_data_t;
 
 void gui_render(bitui_t ctx, const gui_data_t *data);
