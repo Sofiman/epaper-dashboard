@@ -6,10 +6,11 @@
 #include "gfxfont.h"
 #define PROGMEM
 #include "Meteocons.h"
-#include "DigitalDisco12pt7b.h"
-#include "Thixel8pt7b.h"
+#include "DigitalDisco16pt7b.h"
+#include "Blocktopia8pt7b.h"
 #include "Icons.h"
-#define FONT DigitalDisco12pt7b
+#define FONT_BIG DigitalDisco16pt7b
+#define FONT_SMALL Blocktopia8pt7b
 
 typedef enum : uint16_t {
     LAYOUT_HORIZONTAL,
@@ -93,7 +94,7 @@ static char temp_str[80];
 static void gui_render_boot(bitui_t ctx, const gui_data_t *data) {
     (void)data;
     bitui_clear(ctx, true);
-    render_text(ctx, &FONT, "Connecting to Wi-Fi", 32, 48);
+    render_text(ctx, &FONT_BIG, "Connecting to Wi-Fi", 32, 48);
 }
 
 static void gui_render_wifi_init(bitui_t ctx, const gui_data_t *data) {
@@ -102,21 +103,8 @@ static void gui_render_wifi_init(bitui_t ctx, const gui_data_t *data) {
     esp_netif_ip_info_t ip_info;
     esp_netif_get_ip_info(data->netif, &ip_info);
 
-    snprintf(temp_str, sizeof(temp_str), "Connected\nIP: " IPSTR "\nSyncing time...", IP2STR(&ip_info.ip));
-    render_text(ctx, &FONT, temp_str, 32, 48);
-}
-
-static void gui_render_sync_time(bitui_t ctx, const gui_data_t *data) {
-    (void)data;
-    time_t now = 0;
-    struct tm timeinfo = { 0 };
-    time(&now);
-
-    localtime_r(&now, &timeinfo);
-    strftime(temp_str, sizeof(temp_str), "%A %d %b, %R", &timeinfo);
-
-    bitui_clear(ctx, true);
-    render_text(ctx, &FONT, temp_str, 16, 20);
+    tmp_sprintf("Connected\nIP: " IPSTR "\nSyncing time...", IP2STR(&ip_info.ip));
+    render_text(ctx, &FONT_BIG, temp_str, 32, 48);
 }
 
 static void draw_widget_outline(bitui_t ctx, bitui_rect_t bbox, const char *label)
@@ -132,10 +120,10 @@ static void draw_widget_outline(bitui_t ctx, bitui_rect_t bbox, const char *labe
     ctx->color = false;
     bitui_rect(ctx, bbox);
 
-    struct size s = measure_text(&Thixel8pt7b, label);
+    struct size s = measure_text(&FONT_SMALL, label);
     ctx->color = true;
     bitui_line(ctx, bbox.x + PADDING_H, bbox.y, bbox.x + PADDING_H + PADDING_H / 2 + s.w, bbox.y);
-    render_text(ctx, &Thixel8pt7b, label, bbox.x + PADDING_H + PADDING_H / 2, bbox.y + s.h / 4);
+    render_text(ctx, &FONT_SMALL, label, bbox.x + PADDING_H + PADDING_H / 2, bbox.y + s.h / 4);
 }
 
 static size_t find_closest(const int64_t *haystack, size_t count, int64_t needle) {
@@ -236,9 +224,9 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
             strftime(temp_str, sizeof(temp_str), "%H:%M", localtime_r(&now, &timeinfo));
 
             pos = bitlayout_element(&list, (bitui_point_t) { .x = COL_WIDTH, .y = COL_HEIGHT });
-            s = measure_text(&Thixel8pt7b, temp_str);
+            s = measure_text(&FONT_SMALL, temp_str);
             pos.y += s.h/2;
-            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
+            render_text(ctx, &FONT_SMALL, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
 
             pos.y += PADDING;
             pos.y += Meteocons.yAdvance;
@@ -251,12 +239,12 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
 
         pos = bitlayout_element(&list, (bitui_point_t) { .x = COL_WIDTH, .y = COL_HEIGHT });
 
-        pos.y += Thixel8pt7b.yAdvance/2;
+        pos.y += FONT_SMALL.yAdvance/2;
         if ((i + hour_label_offset) % LABEL_INTERVAL == 0) {
             now = forecast->hourly.time[cur_hour];
             strftime(temp_str, sizeof(temp_str), "%H:00", localtime_r(&now, &timeinfo));
-            s = measure_text(&Thixel8pt7b, temp_str);
-            render_text(ctx, &Thixel8pt7b, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
+            s = measure_text(&FONT_SMALL, temp_str);
+            render_text(ctx, &FONT_SMALL, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
         }
 
         pos.y += PADDING + Meteocons.yAdvance;
@@ -264,10 +252,10 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         const GFXglyph glyph = Meteocons.glyph[icon];
         bitui_paste_bitstream(ctx, Meteocons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, pos.x + COL_WIDTH / 2 - (glyph.xOffset + glyph.width) / 2, pos.y + glyph.yOffset);
 
-        snprintf(temp_str, sizeof(temp_str), "%.1f", forecast->hourly.temperature_2m[cur_hour]);
-        s = measure_text(&Thixel8pt7b, temp_str);
+        tmp_sprintf("%.1f", forecast->hourly.temperature_2m[cur_hour]);
+        s = measure_text(&FONT_SMALL, temp_str);
         pos.y += PADDING + s.h/2;
-        render_text(ctx, &Thixel8pt7b, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
+        render_text(ctx, &FONT_SMALL, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
     }
 }
 
@@ -278,10 +266,10 @@ static void widget_time(bitui_t ctx, const gui_data_t *data)
     time(&now);
 
     localtime_r(&now, &timeinfo);
-    strftime(temp_str, sizeof(temp_str), "%R", &timeinfo);
+    strftime(temp_str, sizeof(temp_str), "%A %d %b, %R", &timeinfo);
 
-    struct size s = measure_text(&DigitalDisco12pt7b, temp_str);
-    render_text(ctx, &DigitalDisco12pt7b, temp_str, 10, s.h);
+    struct size s = measure_text(&FONT_BIG, temp_str);
+    render_text(ctx, &FONT_BIG, temp_str, SCREEN_ROWS / 2 - s.w / 2, 12 + s.h / 2);
 }
 
 #include <math.h>
@@ -301,16 +289,16 @@ static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
     draw_widget_outline(ctx, (bitui_rect_t){ .x = start_x, .y = START_Y, .w = WIDTH, .h = HEIGHT }, label);
 
     struct size s;
-    s = measure_text(&Thixel8pt7b, unit);
-    render_text(ctx, &Thixel8pt7b, unit, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
+    s = measure_text(&FONT_SMALL, unit);
+    render_text(ctx, &FONT_SMALL, unit, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
 
     const int error = 1;
     if (error < 0) {
         tmp_sprintf("E%x", -error);
 
-        s = measure_text(&Thixel8pt7b, temp_str);
+        s = measure_text(&FONT_SMALL, temp_str);
         uint16_t start_y = START_Y + HEIGHT / 2 + MARGIN - (17 + MARGIN + s.h/2) / 2;
-        render_text(ctx, &Thixel8pt7b, temp_str, start_x + WIDTH / 2 - s.w/2, start_y + 17 + MARGIN + s.h/2);
+        render_text(ctx, &FONT_SMALL, temp_str, start_x + WIDTH / 2 - s.w/2, start_y + 17 + MARGIN + s.h/2);
 
         const GFXglyph glyph = Icons.glyph[ICON_WARNING];
         bitui_paste_bitstream(ctx, Icons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, start_x + WIDTH/2 - 17/2, start_y);
@@ -318,8 +306,8 @@ static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
     }
 
     if (error == 0) {
-        s = measure_text(&Thixel8pt7b, "no history");
-        render_text(ctx, &Thixel8pt7b, "no history", start_x + WIDTH / 2 - s.w / 2, START_Y + HEIGHT / 2 - MARGIN + s.h/2);
+        s = measure_text(&FONT_SMALL, "no history");
+        render_text(ctx, &FONT_SMALL, "no history", start_x + WIDTH / 2 - s.w / 2, START_Y + HEIGHT / 2 - MARGIN + s.h/2);
         return;
     }
 
@@ -351,7 +339,6 @@ typedef void (*gui_screeen_renderer_t)(bitui_t ctx, const gui_data_t *data);
 const gui_screeen_renderer_t GUI_SCREEN_RENDERERERS[GUI_COUNT] = {
     [GUI_BOOT] = gui_render_boot,
     [GUI_WIFI_INIT] = gui_render_wifi_init,
-    [GUI_SYNC_TIME] = gui_render_sync_time,
     [GUI_HOME] = gui_render_home,
 };
 
