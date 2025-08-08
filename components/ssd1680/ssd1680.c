@@ -22,13 +22,13 @@ enum Command {
     CMD_WriteRegisterForInitialCodeSetting = 0x09,
     CMD_ReadRegisterForInitialCodeSetting = 0x0A,
     CMD_BoosterSoftStartControl = 0x0C,
-    CMD_GateScanStartPosition = 0x0F,
+    CMD_GateScanStartPosition = 0x0F, // not available on SSD1685
     CMD_DeepSleepMode = 0x10,
     CMD_DataEntryModeSetting = 0x11,
     CMD_SWReset = 0x12,
     CMD_HVReadyDetection = 0x14,
     CMD_VCIDetection = 0x15,
-    CMD_TemperatureSensorControl = 0x18,
+    CMD_TemperatureSensorSelection = 0x18,
     CMD_WriteTemperatureRegister = 0x1A,
     CMD_ReadTemperatureRegister = 0x1B,
     CMD_WriteCommandToExternalTemperatureSensor = 0x1C,
@@ -79,9 +79,16 @@ enum DeepSleepMode {
     DEEP_SLEEP_MODE_2 = 0x3,
 };
 
-enum SourceOutputMode {
-    SOURCE_S0_TO_S175 = 0x00,
-    SOURCE_S8_TO_S167 = 0x80,
+enum SSD1680_SourceOutputMode {
+    SSD1680_SOURCE_S0_TO_S175 = 0x00,
+    SSD1680_SOURCE_S8_TO_S167 = 0x80,
+};
+
+enum SSD1685_ResolutionSelection {
+    SSD1685_RES_200x384 = 0x00,
+    SSD1685_RES_184x384 = 0x40,
+    SSD1685_RES_168x384 = 0x80,
+    SSD1685_RES_216x384 = 0xC0,
 };
 
 enum RAMOption {
@@ -95,13 +102,33 @@ enum TemperatureSensorSelection {
     TEMP_SENSOR_EXTERNAL = 0x48,
 };
 
-/// Context (config and data) of the spi_ssd1680
+// Set the direction in which the address counter is updated automatically after
+// data are written to the RAM.
+enum AM {
+    // the address counter is updated in the X direction
+    AM_X = 0,
+    // the address counter is updated in the Y direction
+    AM_Y = 1,
+};
+
+// Address automatic increment / decrement
+enum DataEntryMode {
+    DATA_ENTRY_X_INC = 0x1,
+    DATA_ENTRY_Y_INC = 0x2,
+
+    DATA_ENTRY_Y_DEC_X_DEC = 0,
+    DATA_ENTRY_Y_DEC_X_INC = DATA_ENTRY_X_INC,
+    DATA_ENTRY_Y_INC_X_DEC = DATA_ENTRY_Y_INC,
+    DATA_ENTRY_Y_INC_X_INC = DATA_ENTRY_Y_INC | DATA_ENTRY_X_INC,
+};
+
+// Context (config and data) of the spi_ssd1680
 struct ssd1680_context_t {
-    union { ///< Configuration by the caller.
+    union { // < Configuration by the caller.
         const ssd1680_config_t cfg;
         ssd1680_config_t init_cfg;
     };
-    spi_device_handle_t spi;    ///< SPI device handle
+    spi_device_handle_t spi; // SPI device handle
 };
 
 typedef struct ssd1680_context_t ssd1680_context_t;
@@ -148,23 +175,37 @@ defer:
     return ret;
 }
 
+static bool ssd1680_check_controller_resolution(ssd1680_controller_t controller, uint16_t cols, uint16_t rows) {
+    switch (controller) {
+    case SSD1680:
+        return cols >= SSD1680_MIN_COLS && cols <= SSD1680_MAX_COLS
+            && rows >= SSD1680_MIN_ROWS && rows <= SSD1680_MAX_ROWS;
+    case SSD1685:
+        return cols >= SSD1685_MIN_COLS && cols <= SSD1685_MAX_COLS
+            && rows >= SSD1685_MIN_ROWS && rows <= SSD1685_MAX_ROWS;
+    default:
+        break;
+    }
+    return 0;
+}
+
 esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle)
 {
     esp_err_t err = ESP_OK;
+    if (cfg->controller == SSD168x_UNKNOWN) {
+        ESP_LOGE(TAG, "Missing SSD168x variant. Please select one of ssd1680_controller_t.");
+        return ESP_ERR_INVALID_ARG;
+    }
     if (cfg->host == SPI1_HOST) {
         ESP_LOGE(TAG, "interrupt cannot be used on SPI1 host.");
         return ESP_ERR_INVALID_ARG;
     }
-    if (cfg->cols < 1 || cfg->cols > 176) {
-        ESP_LOGE(TAG, "Column configuration not supported by the display driver.");
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (cfg->rows < 16 || cfg->rows > 296) {
-        ESP_LOGE(TAG, "Row configuration not supported by the display driver.");
-        return ESP_ERR_INVALID_ARG;
-    }
     if (cfg->framebuffer == NULL) {
         ESP_LOGE(TAG, "Framebuffer is required.");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!ssd1680_check_controller_resolution(cfg->controller, cfg->cols, cfg->rows)) {
+        ESP_LOGE(TAG, "Resolution not supported by the current controller.");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -238,8 +279,8 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
     }
 
     {
-        const uint8_t data_entry_setting = (0 << 2) // Line is in the X direction
-            | 0x03; // Increment X, at the end of the line, increment Y
+        const uint8_t data_entry_setting = (AM_X << 2)
+            | DATA_ENTRY_Y_INC_X_INC; // Increment X, at the end of the line, increment Y
 
         err = ssd1680_cmd_write(ctx, CMD_DataEntryModeSetting, &data_entry_setting, sizeof(data_entry_setting));
         if (err != ESP_OK)
@@ -264,17 +305,21 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
 
     {
         const uint8_t temp_sensor_selection = TEMP_SENSOR_INTERNAL;
-        err = ssd1680_cmd_write(ctx, CMD_TemperatureSensorControl, &temp_sensor_selection, sizeof(temp_sensor_selection));
+        err = ssd1680_cmd_write(ctx, CMD_TemperatureSensorSelection, &temp_sensor_selection, sizeof(temp_sensor_selection));
         if (err != ESP_OK)
             goto cleanup;
     }
 
     {
-        const uint8_t display_update_ctrl[2] = {
-            ((RAM_Normal) << 4) // Bypass Red RAM
-                | RAM_Normal, // Normal operation for BW RAM
-            SOURCE_S8_TO_S167, // TODO
-        };
+        uint8_t display_update_ctrl[2];
+        display_update_ctrl[0] = ((RAM_BypassAs0) << 4) // Bypass Red RAM
+                | RAM_Normal; // Normal operation for BW RAM
+        switch (ctx->cfg.controller) {
+        case SSD1680: display_update_ctrl[1] = SSD1680_SOURCE_S8_TO_S167; break;
+        case SSD1685: display_update_ctrl[1] = SSD1685_RES_168x384; break; // TODO: select proper resolution
+        case SSD168x_UNKNOWN: return ESP_ERR_INVALID_STATE; // Should have been caught by ssd1680_check_controller_resolution
+        }
+
         err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl1, display_update_ctrl, sizeof(display_update_ctrl));
         if (err != ESP_OK)
             goto cleanup;
