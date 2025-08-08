@@ -247,6 +247,7 @@ void init_devices() {
 
     ESP_LOGI(TAG, "Initializing SSD1680...");
     ret = ssd1680_init(&(ssd1680_config_t) {
+        .controller = SSD1685,
         .host = SPI2_HOST,
         .busy_pin = GPIO_NUM_0,
         .reset_pin = GPIO_NUM_1,
