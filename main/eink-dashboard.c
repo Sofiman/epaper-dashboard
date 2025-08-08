@@ -36,19 +36,16 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-#define SCREEN_COLS 128
-#define SCREEN_STRIDE ((SCREEN_COLS - 1) / 8 + 1)
-#define SCREEN_ROWS 296
 static uint8_t framebuffer[SCREEN_STRIDE * SCREEN_ROWS];
 
-static void *static_reserve_uint64(void *cursor, size_t i) {
+static void *static_reserve_hourly_uint64(void *cursor, size_t i) {
     return i < FORECAST_HOURLY_POINT_COUNT ? ((uint64_t*)cursor) + i : NULL;
 }
 
-static JsonArrayDescription array_describe_time(void *cursor) {
+static JsonArrayDescription array_describe_hourly_time(void *cursor) {
     return (JsonArrayDescription) {
-        .exitpoint = (uint8_t*)cursor + sizeof(((struct Hourly*)NULL)->time),
-        .array_reserve_fn = static_reserve_uint64,
+        .exitpoint = (uint8_t*)cursor + sizeof(((struct ForecastHourly*)NULL)->time),
+        .array_reserve_fn = static_reserve_hourly_uint64,
         .item_tag = KIND_INTEGER,
         .item_val = { .integer = { .bitwidth = 64 } }
     };
@@ -60,7 +57,7 @@ static void *static_reserve_float(void *cursor, size_t i) {
 
 static JsonArrayDescription array_describe_temperature(void *cursor) {
     return (JsonArrayDescription) {
-        .exitpoint = (uint8_t*)cursor + sizeof(((struct Hourly*)NULL)->temperature_2m),
+        .exitpoint = (uint8_t*)cursor + sizeof(((struct ForecastHourly*)NULL)->temperature_2m),
         .array_reserve_fn = static_reserve_float,
         .item_tag = KIND_DOUBLE,
     };
@@ -72,22 +69,38 @@ static void *static_reserve_uint8(void *cursor, size_t i) {
 
 static JsonArrayDescription array_describe_weather_code(void *cursor) {
     return (JsonArrayDescription) {
-        .exitpoint = (uint8_t*)cursor + sizeof(((struct Hourly*)NULL)->weather_code_2m),
+        .exitpoint = (uint8_t*)cursor + sizeof(((struct ForecastHourly*)NULL)->weather_code),
         .array_reserve_fn = static_reserve_uint8,
         .item_tag = KIND_INTEGER,
         .item_val = { .integer = { .bitwidth = 8 } }
     };
 }
 
+static void *static_reserve_daily_int64(void *cursor, size_t i) {
+    return i < FORECAST_DURATION_DAYS ? ((int64_t*)cursor) + i : NULL;
+}
+
+static JsonArrayDescription array_describe_daily_time(void *cursor) {
+    return (JsonArrayDescription) {
+        .exitpoint = (uint8_t*)cursor + sizeof(((struct ForecastDaily*)NULL)->time),
+        .array_reserve_fn = static_reserve_daily_int64,
+        .item_tag = KIND_INTEGER,
+        .item_val = { .integer = { .bitwidth = 64, .is_signed = true } }
+    };
+}
+
 const JsonObjectProperty forecast_schema[] = {
     { .key = JSON_SCHEMA_DOUBLE "latitude" },
     { .key = JSON_SCHEMA_DOUBLE "longitude" },
-    { .key = JSON_SCHEMA_INTEGER "utc_offset_seconds", { .integer = { .bitwidth = 32 } } },
-    { .key = JSON_SCHEMA_STRING "timezone_abbreviation" },
     { .key = JSON_SCHEMA_OBJECT "hourly", { .obj_desc = JSON_INLINE_OBJ_BEGIN } },
-        { .key = JSON_SCHEMA_ARRAY "time", { .array_describe = array_describe_time } },
+        { .key = JSON_SCHEMA_ARRAY "time", { .array_describe = array_describe_hourly_time } },
         { .key = JSON_SCHEMA_ARRAY "temperature_2m", { .array_describe = array_describe_temperature } },
         { .key = JSON_SCHEMA_ARRAY "weather_code", { .array_describe = array_describe_weather_code  }  },
+    { .key = JSON_SCHEMA_OBJECT, { .obj_desc = JSON_INLINE_OBJ_END } },
+    { .key = JSON_SCHEMA_OBJECT "daily", { .obj_desc = JSON_INLINE_OBJ_BEGIN } },
+        { .key = JSON_SCHEMA_ARRAY "time", { .array_describe = array_describe_daily_time } },
+        { .key = JSON_SCHEMA_ARRAY "sunrise", { .array_describe = array_describe_daily_time } },
+        { .key = JSON_SCHEMA_ARRAY "sunset", { .array_describe = array_describe_daily_time  }  },
     { .key = JSON_SCHEMA_OBJECT, { .obj_desc = JSON_INLINE_OBJ_END } },
     OBJECT_PROPERTIES_END()
 };
@@ -247,7 +260,7 @@ void init_devices() {
     ESP_ERROR_CHECK(ret);
 }
 
-static struct Forecast forecast;
+static gui_data_t gui_data;
 static bitui_ctx_t bitui_handle;
 
 #define __str(s) #s
@@ -255,7 +268,7 @@ static bitui_ctx_t bitui_handle;
 
 #define WEATHER_WEB_SERVER "api.open-meteo.com"
 #define WEATHER_WEB_PORT "443"
-#define WEATHER_WEB_PATH "/v1/forecast?latitude=48.753899&longitude=2.297500&hourly=temperature_2m,weather_code&daily=sunrise,sunset&timezone=Europe%2FLondon&forecast_days=" str(FORECAST_DURATION_DAYS) "&timeformat=unixtime"
+#define WEATHER_WEB_PATH "/v1/forecast?latitude=48.753899&longitude=2.297500&hourly=temperature_2m,weather_code&daily=sunrise,sunset&forecast_days=" str(FORECAST_DURATION_DAYS) "&timeformat=unixtime"
 #define WEATHER_WEB_URL "https://" WEATHER_WEB_SERVER WEATHER_WEB_PATH
 
 static const char *WEATHER_REQUEST = "GET " WEATHER_WEB_PATH " HTTP/1.0\r\n"
@@ -322,21 +335,39 @@ static void decode_weather(esp_tls_t *tls_session) {
         .string_buffer.alloc_str_fn.closure = alloc_str_fn,
         .remainder = read_from_tls(tls_session)
     };
-    src.remainder.head = memmem(src.remainder.head, src.remainder.tail - src.remainder.head, "\r\n\r\n", 4);
+    typeof(src.remainder) remainder = src.remainder;
+#define HTTP_HEAD_END "\r\n\r\n"
+    src.remainder.head = memmem(src.remainder.head, src.remainder.tail - src.remainder.head, HTTP_HEAD_END, sizeof(HTTP_HEAD_END) - 1);
     if (src.remainder.head != NULL) {
-        src.remainder.head += 4;
-        struct Forecast *out = &forecast;
+        src.remainder.head += sizeof(HTTP_HEAD_END) - 1;
+        struct Forecast *out = &gui_data.forecast;
         if (!json_deserialize_object(&src, (void**)&out, forecast_schema)) {
-            ESP_LOGI(TAG, "Failed to deserialize forecast\n");
-            ESP_LOGI(TAG, " %zu:%zu  | %.*s\n", src.line, json_source_column(&src), (int)(src.remainder.tail - src.remainder.head), src.remainder.head);
+            ESP_LOGE(TAG, "Failed to deserialize forecast\n");
+            ESP_LOGE(TAG, " %zu:%zu  | %.*s\n", src.line, json_source_column(&src), (int)(src.remainder.tail - src.remainder.head), src.remainder.head);
         } else {
-            ESP_LOGI(TAG, "Got lat=%f, lon=%f", forecast.latitude, forecast.longitude);
-            time(&forecast.updated_at);
+            ESP_LOGI(TAG, "Got lat=%f, lon=%f", gui_data.forecast.latitude, gui_data.forecast.longitude);
+
+            ESP_LOGD(TAG, "forecast.hourly=[");
+            for (int i = 0; i < FORECAST_HOURLY_POINT_COUNT; i++) {
+                ESP_LOGD(TAG, "\ttime[%d] = %lld\ttemperature_2m[%d] = %.1f\tweather_code[%d] = %hhu,", i, gui_data.forecast.hourly.time[i], i, gui_data.forecast.hourly.temperature_2m[i], i, gui_data.forecast.hourly.weather_code[i]);
+            }
+            ESP_LOGD(TAG, "]");
+
+            ESP_LOGI(TAG, "forecast.daily=[");
+            for (int i = 0; i < FORECAST_DURATION_DAYS; i++) {
+                ESP_LOGD(TAG, "\ttime[%d] = %lld\tsunrise[%d] = %lld\tsunset[%d] = %lld,", i, gui_data.forecast.daily.time[i], i, gui_data.forecast.daily.sunrise[i], i, gui_data.forecast.daily.sunset[i]);
+            }
+            ESP_LOGD(TAG, "]");
+            time(&gui_data.forecast.updated_at);
         }
+    } else {
+        ESP_LOGE(TAG, "Failed to deserialize forecast: `%.*s`\n", (int)(remainder.tail - remainder.head), remainder.head);
     }
 }
 
-static void render_weather(void) {
+static void render_gui(bitui_t ctx) {
+    gui_render(ctx, &gui_data);
+
     esp_err_t ret = ssd1680_wait_until_idle(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
     ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
@@ -368,51 +399,22 @@ void app_main(void)
 
     bitui_t ctx = &bitui_handle;
 
-    // Clear other pixels, clear the dirty zone
-    ctx->dirty = (bitui_rect_t){0};
-    ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
-        .x = 0, .y = 0,
-        .w = SCREEN_COLS, .h = SCREEN_ROWS
-    });
-    ESP_ERROR_CHECK(ret);
-    ret = ssd1680_full_refresh(ssd1680_handle);
-    ESP_ERROR_CHECK(ret);
+    render_gui(ctx);
 
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-
+    gui_data.current_screen = GUI_WIFI_INIT;
+    render_gui(ctx);
     wifi_init_sta();
-
-    ret = ssd1680_wait_until_idle(ssd1680_handle);
-    ESP_ERROR_CHECK(ret);
-    ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
-        .x = 0, .y = 0,
-        .w = SCREEN_COLS, .h = SCREEN_ROWS
-    });
-    ESP_ERROR_CHECK(ret);
-    ret = ssd1680_full_refresh(ssd1680_handle);
-    ESP_ERROR_CHECK(ret);
-
     esp_netif_sntp_start();
     ESP_ERROR_CHECK(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000))); // 10s
 
-    ret = ssd1680_wait_until_idle(ssd1680_handle);
-    ESP_ERROR_CHECK(ret);
-    ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
-        .x = 0, .y = 0,
-        .w = SCREEN_COLS, .h = SCREEN_ROWS
-    });
-    ESP_ERROR_CHECK(ret);
-    ret = ssd1680_full_refresh(ssd1680_handle);
-    ESP_ERROR_CHECK(ret);
+    gui_data.forecast.updated_at = 0;
+    gui_data.current_screen = GUI_HOME;
 
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    render_gui(ctx);
 
-    forecast.updated_at = 0;
     https_get_request(WEATHER_WEB_URL, WEATHER_REQUEST, decode_weather);
 
-    if (forecast.updated_at != 0) {
-        render_weather();
-    }
+    render_gui(ctx);
 
     vTaskDelay(100 / portTICK_PERIOD_MS);
 
