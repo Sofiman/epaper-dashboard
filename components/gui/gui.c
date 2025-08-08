@@ -138,7 +138,6 @@ static size_t find_closest(const int64_t *haystack, size_t count, int64_t needle
 static bool is_day(const struct Forecast *forecast, int64_t now, int64_t *sun_event_time) {
     const size_t cur_day = find_closest(forecast->daily.time, FORECAST_DURATION_DAYS - 1, now);
 
-    // TODO: type signness mismatch
     const int64_t diff_sunrise = now - forecast->daily.sunrise[cur_day];
     const int64_t  diff_sunset = now - forecast->daily.sunset [cur_day];
 
@@ -163,12 +162,12 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
     const struct Forecast *forecast = &data->forecast;
 
     enum {
-        COL_WIDTH = 29,
-        COL_HEIGHT = 52,
+        COL_WIDTH = 32,
+        COL_HEIGHT = 54,
         PADDING = 4,
-        HOURS_DISPLAYED = SCREEN_ROWS / COL_WIDTH,
-        START_X = SCREEN_ROWS / 2 - HOURS_DISPLAYED*COL_WIDTH/2,
-        START_Y = 116,
+        HOURS_DISPLAYED = (SCREEN_ROWS - 6 - 1) / COL_WIDTH,
+        START_X = 1,
+        START_Y = 114,
         LABEL_INTERVAL = 2,
     };
 
@@ -180,25 +179,24 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         const bool is_error = forecast->updated_at < 0;
         const char *status = "loading";
         if (is_error) {
-            snprintf(temp_str, sizeof(temp_str), "E%lx", -forecast->updated_at);
+            tmp_sprintf("E%llx", -forecast->updated_at);
             status = temp_str;
         }
 
-        s = measure_text(&Thixel8pt7b, status);
+        s = measure_text(&FONT_SMALL, status);
         uint16_t start_y = START_Y + COL_HEIGHT / 2 - (17 + PADDING * 3 + s.h/2) / 2;
-        render_text(ctx, &Thixel8pt7b, status, SCREEN_ROWS / 2 - s.w / 2, start_y + 17 + PADDING * 3);
+        render_text(ctx, &FONT_SMALL, status, SCREEN_ROWS / 2 - s.w / 2, start_y + 17 + PADDING * 3);
 
         const GFXglyph glyph = Icons.glyph[is_error ? ICON_WARNING : (ICON_HOURGLASS_FILLED_20 + data->tick % 5)];
         bitui_paste_bitstream(ctx, Icons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, SCREEN_ROWS / 2 - (glyph.xOffset + glyph.width) / 2, start_y);
         return;
     }
 
-    bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = 0, .cursor = { .x = START_X, .y = START_Y } };
+    bitlayout_t list = { .dir = LAYOUT_HORIZONTAL, .element_gap = 3, .cursor = { .x = START_X, .y = START_Y + 2 } };
 
     time_t now = time(NULL);
     _Static_assert(FORECAST_HOURLY_POINT_COUNT >= HOURS_DISPLAYED);
-    size_t cur_hour = find_closest(forecast->hourly.time, FORECAST_HOURLY_POINT_COUNT - HOURS_DISPLAYED, now) + 1;
-    // TODO: possible overflow with +1
+    size_t cur_hour = find_closest(forecast->hourly.time, FORECAST_HOURLY_POINT_COUNT - HOURS_DISPLAYED, now);
 
     // Calculate the label offset to prevent overlapping text when displaying
     // the exact sunrise/sunset hours.
@@ -279,7 +277,7 @@ static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
         MARGIN = 2,
         WIDTH = (SCREEN_ROWS - 2 * MARGIN) / 3,
         HEIGHT = 44,
-        START_Y = 58,
+        START_Y = 52,
         USABLE_HEIGHT = 32,
     };
 
