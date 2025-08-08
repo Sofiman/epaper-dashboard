@@ -386,7 +386,7 @@ void app_main(void)
 
     init_devices();
 
-    setenv("TZ", "CEST", 1);
+    setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
 
     bitui_handle = (bitui_ctx_t){
