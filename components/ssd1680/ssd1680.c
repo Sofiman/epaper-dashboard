@@ -8,7 +8,8 @@
 #define DC_LEVEL(SPI_TransactionUserData) (SPI_TransactionUserData < 0)
 #define DC_PIN(SPI_TransactionUserData) ((SPI_TransactionUserData) < 0 ? (-SPI_TransactionUserData) : (SPI_TransactionUserData))
 typedef gpio_num_t SPI_TransactionUserData;
-_Static_assert(sizeof(SPI_TransactionUserData) <= sizeof(void*), "No memory allocation required");
+_Static_assert(sizeof(SPI_TransactionUserData) <= sizeof(((spi_transaction_t*)NULL)->user),
+        "SPI_TransactionUserData can be used in spi_transaction_t.user");
 
 // MAX CLK freq in WRITE mode:  20 Mhz
 // MAX CLK freq in  READ mode: 2.5 Mhz
