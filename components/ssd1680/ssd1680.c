@@ -123,6 +123,13 @@ enum DataEntryMode : uint8_t {
     DATA_ENTRY_Y_INC_X_INC = DATA_ENTRY_Y_INC | DATA_ENTRY_X_INC,
 };
 
+enum RefreshMode {
+    REFRESH_NORMAL = 0,
+    REFRESH_FAST,
+    REFRESH_PARTIAL,
+    REFRESH_UNKNOWN = -1,
+};
+
 // Context (config and data) of the spi_ssd1680
 struct ssd1680_context_t {
     union { // < Configuration by the caller.
@@ -231,6 +238,7 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
         return ESP_ERR_NO_MEM;
 
     ctx->init_cfg = *cfg;
+    ctx->last_refresh_mode = REFRESH_UNKNOWN;
 
     spi_device_interface_config_t devcfg = {
         .mode = 0,
@@ -429,26 +437,24 @@ esp_err_t ssd1680_flush(ssd1680_handle_t h, ssd1680_rect_t rect) {
     };
 
     err = spi_device_polling_transmit(h->spi, &command);
-    if (err != ESP_OK)
-        goto defer;
+    if (err != ESP_OK) goto defer;
 
     const size_t row_stride = (h->cfg.cols - 1) / 8 + 1;
     spi_transaction_t payload = {
-        .length = h->cfg.cols,
+        .length = h->cfg.cols, // TODO: Incorrect when rect is a smaller window
         .tx_buffer = h->cfg.framebuffer,
         .user = (void*)DC_DATA(h->cfg.dc_pin),
         .flags = SPI_TRANS_CS_KEEP_ACTIVE
     };
 
     for (uint16_t row = 0; row < h->cfg.rows; ++row) {
-        payload.tx_buffer = &h->cfg.framebuffer[row * row_stride];
+        payload.tx_buffer = &h->cfg.framebuffer[row * row_stride]; // TODO: Incorrect when rect is a smaller window
         if (row + 1 == h->cfg.rows) payload.flags = 0;
 
         err = spi_device_polling_transmit(h->spi, &payload);
         if (err != ESP_OK)
             goto defer;
     }
-
 
 defer:
     spi_device_release_bus(h->spi);
@@ -464,7 +470,53 @@ esp_err_t ssd1680_full_refresh(ssd1680_handle_t ctx) {
     err = spi_device_acquire_bus(ctx->spi, portMAX_DELAY);
     if (err != ESP_OK) goto defer;
 
+    // TODO: Official example from GoodDisplay uses 0xF4.
+    // 0xF7 reloads temp+LUT everytime
+    // 0xF4 seems to reloads temp+LUT everytime.. So what is the difference?
     err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, 0xF7);
+    if (err != ESP_OK) goto defer;
+    ctx->last_refresh_mode = REFRESH_NORMAL;
+
+    err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq);
+
+defer:
+    spi_device_release_bus(ctx->spi);
+    return err;
+}
+
+esp_err_t ssd1680_fast_refresh(ssd1680_handle_t ctx) {
+    if (ctx->spi == NULL)
+        return ESP_ERR_INVALID_ARG;
+
+    esp_err_t err;
+
+    err = spi_device_acquire_bus(ctx->spi, portMAX_DELAY);
+    if (err != ESP_OK) goto defer;
+
+    if (ctx->last_refresh_mode != REFRESH_FAST) {
+        // Explanation: https://github.com/adafruit/Adafruit_EPD/issues/50#issuecomment-2692173758
+        err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl1,
+            ((RAM_BypassAs0) << 4) | RAM_Normal, // BW RAM
+            SSD1685_RES_168x384,
+        );
+        if (err != ESP_OK) goto defer;
+
+        err = ssd1680_cmd_write(ctx, CMD_WriteTemperatureRegister, 0x6E); // 110C
+        if (err != ESP_OK) goto defer;
+
+        err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, 0x91); // Load corresponding LUT
+        if (err != ESP_OK) goto defer;
+
+        err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq);
+        if (err != ESP_OK) goto defer;
+
+        err = ssd1680_wait_until_idle(ctx);
+        if (err != ESP_OK) goto defer;
+
+        ctx->last_refresh_mode = REFRESH_FAST;
+    }
+
+    err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, 0xC7);
     if (err != ESP_OK) goto defer;
 
     err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq);
