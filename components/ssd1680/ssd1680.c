@@ -233,7 +233,7 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
         .mode = 0,
         .clock_speed_hz = SSD1680_CLK_FREQ,
         .spics_io_num = cfg->cs_pin,
-        .flags = SPI_DEVICE_HALFDUPLEX,
+        .flags = SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_3WIRE,
         .queue_size = 1,
         .pre_cb = cfg->dc_pin == -1 ? NULL : ssd1680_spi_pre_transfer_callback
     };
