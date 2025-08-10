@@ -136,7 +136,8 @@ static size_t find_closest(const int64_t *haystack, size_t count, int64_t needle
 }
 
 static bool is_day(const struct Forecast *forecast, int64_t now, int64_t *sun_event_time) {
-    const size_t cur_day = find_closest(forecast->daily.time, FORECAST_DURATION_DAYS - 1, now);
+    const size_t cur_day = find_closest(forecast->daily.time, FORECAST_DURATION_DAYS, now) - 1;
+    assert(cur_day < FORECAST_DURATION_DAYS && "`now` is somehow earlier than `daily.time[0]`");
 
     const int64_t diff_sunrise = now - forecast->daily.sunrise[cur_day];
     const int64_t  diff_sunset = now - forecast->daily.sunset [cur_day];
