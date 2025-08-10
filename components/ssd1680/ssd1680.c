@@ -14,7 +14,7 @@ _Static_assert(sizeof(SPI_TransactionUserData) <= sizeof(void*), "No memory allo
 // MAX CLK freq in  READ mode: 2.5 Mhz
 #define SSD1680_CLK_FREQ 2 * 1000 * 1000 /* 2Mhz*/
 
-enum Command {
+enum Command : uint8_t {
     CMD_DriverOutputControl = 0x01,
     CMD_GateDrivingVoltageControl = 0x03,
     CMD_SourceDrivingVoltageControl = 0x04,
@@ -69,7 +69,7 @@ enum Command {
 
 // After this command initiated, the chip will enter Deep Sleep Mode, BUSY pad will keep output high.
 // To Exit Deep Sleep mode, User required to send HWRESET to the driver
-enum DeepSleepMode {
+enum DeepSleepMode : uint8_t {
     DEEP_SLEEP_DISABLED = 0x0,
     // Retain RAM data but cannot access the RAM
     // Typical power consumption: 1uA (max 3uA)
@@ -79,32 +79,32 @@ enum DeepSleepMode {
     DEEP_SLEEP_MODE_2 = 0x3,
 };
 
-enum SSD1680_SourceOutputMode {
+enum SSD1680_SourceOutputMode : uint8_t {
     SSD1680_SOURCE_S0_TO_S175 = 0x00,
     SSD1680_SOURCE_S8_TO_S167 = 0x80,
 };
 
-enum SSD1685_ResolutionSelection {
+enum SSD1685_ResolutionSelection : uint8_t {
     SSD1685_RES_200x384 = 0x00,
     SSD1685_RES_184x384 = 0x40,
     SSD1685_RES_168x384 = 0x80,
     SSD1685_RES_216x384 = 0xC0,
 };
 
-enum RAMOption {
+enum RAMOption : uint8_t {
     RAM_Normal = 0x0,
     RAM_BypassAs0 = 0x4,
     RAM_Inverse = 0x8,
 };
 
-enum TemperatureSensorSelection {
+enum TemperatureSensorSelection : uint8_t {
     TEMP_SENSOR_INTERNAL = 0x80,
     TEMP_SENSOR_EXTERNAL = 0x48,
 };
 
 // Set the direction in which the address counter is updated automatically after
 // data are written to the RAM.
-enum AM {
+enum AM : uint8_t {
     // the address counter is updated in the X direction
     AM_X = 0,
     // the address counter is updated in the Y direction
@@ -112,7 +112,7 @@ enum AM {
 };
 
 // Address automatic increment / decrement
-enum DataEntryMode {
+enum DataEntryMode : uint8_t {
     DATA_ENTRY_X_INC = 0x1,
     DATA_ENTRY_Y_INC = 0x2,
 
