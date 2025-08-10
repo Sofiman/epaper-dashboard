@@ -135,7 +135,7 @@ typedef struct ssd1680_context_t ssd1680_context_t;
 
 static const char TAG[] = "ssd1680";
 
-static void ssd1680_spi_pre_transfer_callback(spi_transaction_t *t)
+static IRAM_ATTR void ssd1680_spi_pre_transfer_callback(spi_transaction_t *t)
 {
     const SPI_TransactionUserData user_data = (SPI_TransactionUserData)t->user;
     gpio_set_level(DC_PIN(user_data), DC_LEVEL(user_data));
