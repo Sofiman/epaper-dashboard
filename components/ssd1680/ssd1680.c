@@ -141,37 +141,51 @@ static void ssd1680_spi_pre_transfer_callback(spi_transaction_t *t)
     gpio_set_level(DC_PIN(user_data), DC_LEVEL(user_data));
 }
 
-static esp_err_t ssd1680_cmd_write(ssd1680_handle_t h, const enum Command cmd, const uint8_t *data, uint16_t len) {
+struct Cmd {
+    enum Command id;
+    uint8_t data_len;
+    uint8_t data_bytes[4];
+};
+_Static_assert(sizeof(((struct Cmd*)NULL)->data_bytes) == sizeof(((spi_transaction_t*)NULL)->tx_data));
+
+#define ssd1680_cmd_write(Handle, CmdId, ...) __ssd1680_cmd_write((Handle), (struct Cmd){ \
+        .id = (CmdId), \
+        .data_len = sizeof((uint8_t[]){ __VA_ARGS__ }), \
+        .data_bytes = { __VA_ARGS__ }, \
+    })
+
+static esp_err_t __ssd1680_cmd_write(ssd1680_handle_t h, const struct Cmd cmd) {
     esp_err_t ret;
 
-    // Acquire bus required
-    ret = spi_device_acquire_bus(h->spi, portMAX_DELAY);
-    if (ret != ESP_OK)
-        goto defer;
+    // The SSD168x controller expects the D/C pin to be low when in sending the
+    // command, and high, when sending data. Therefore, we can't use the SPI
+    // Master's command and data phases as we rely on
+    // ssd1680_spi_pre_transfer_callback to set the D/C pin state, which is
+    // called for every transactions. Thus, the command and data are split in
+    // two SPI transactions.
 
+    /* Send COMMAND */
     spi_transaction_t command = {
         .length = sizeof(uint8_t) * 8,
-        .tx_data[0] = cmd,
+        .tx_data[0] = cmd.id,
         .user = (void*)DC_COMMAND(h->cfg.dc_pin),
-        .flags = SPI_TRANS_USE_TXDATA | (len > 0 ? SPI_TRANS_CS_KEEP_ACTIVE : 0)
+        .flags = SPI_TRANS_USE_TXDATA | (cmd.data_len > 0 ? SPI_TRANS_CS_KEEP_ACTIVE : 0)
     };
 
     ret = spi_device_polling_transmit(h->spi, &command);
-    if (ret != ESP_OK)
-        goto defer;
 
-    if (len > 0) {
-        spi_transaction_t payload = {
-            .length = sizeof(uint8_t) * 8 * len,
-            .tx_buffer = data,
-            .user = (void*)DC_DATA(h->cfg.dc_pin)
-        };
+    /* Send DATA if there is any */
+    if (cmd.data_len == 0 || ret != ESP_OK) return ret;
 
-        ret = spi_device_polling_transmit(h->spi, &payload);
-    }
+    spi_transaction_t payload = {
+        .length = sizeof(uint8_t) * 8 * cmd.data_len,
+        .tx_data = { cmd.data_bytes[0], cmd.data_bytes[1], cmd.data_bytes[2], cmd.data_bytes[3] },
+        .user = (void*)DC_DATA(h->cfg.dc_pin),
+        .flags = SPI_TRANS_USE_TXDATA
+    };
 
-defer:
-    spi_device_release_bus(h->spi);
+    ret = spi_device_polling_transmit(h->spi, &payload);
+
     return ret;
 }
 
@@ -252,11 +266,14 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
     gpio_set_level(ctx->cfg.reset_pin, 1);
     vTaskDelay(10 / portTICK_PERIOD_MS);
 
-    err = ssd1680_cmd_write(ctx, CMD_SWReset, NULL, 0);
-    if (err != ESP_OK)
-        goto cleanup;
+    // Acquire bus required
+    err = spi_device_acquire_bus(ctx->spi, portMAX_DELAY);
+    if (err != ESP_OK) goto cleanup;
 
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    err = ssd1680_cmd_write(ctx, CMD_SWReset);
+    if (err != ESP_OK) goto cleanup;
+    err = ssd1680_wait_until_idle(ctx);
+    if (err != ESP_OK) goto cleanup;
 
     /* 3. Send Initialization Code
      *    • Set gate driver output by Command 0x01
@@ -265,26 +282,23 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
      */
     {
         const uint16_t rows = cfg->rows - 1;
-        const uint8_t driver_output_control[3] = {
+
+        err = ssd1680_cmd_write(ctx, CMD_DriverOutputControl,
             (uint8_t)(rows & 0xff),
-            (uint8_t)(rows >> 8), // SAFETY: Reserved bits 1-7 are guarantted to be 0 as the lines config check (<=296)
+            (uint8_t)(rows >> 8), // SAFETY: ssd1680_check_controller_resolution checks controller support
             (0 << 2) // Selects the 1st output Gate
                 | (0 << 1) // Change scanning order of gate driver.
                 | (0 << 0), // Change scanning direction of gate driver.
-        };
-
-        err = ssd1680_cmd_write(ctx, CMD_DriverOutputControl, driver_output_control, sizeof(driver_output_control));
-        if (err != ESP_OK)
-            goto cleanup;
+            );
+        if (err != ESP_OK) goto cleanup;
     }
 
     {
         const uint8_t data_entry_setting = (AM_X << 2)
             | DATA_ENTRY_Y_INC_X_INC; // Increment X, at the end of the line, increment Y
 
-        err = ssd1680_cmd_write(ctx, CMD_DataEntryModeSetting, &data_entry_setting, sizeof(data_entry_setting));
-        if (err != ESP_OK)
-            goto cleanup;
+        err = ssd1680_cmd_write(ctx, CMD_DataEntryModeSetting, data_entry_setting);
+        if (err != ESP_OK) goto cleanup;
     }
 
     {
@@ -292,9 +306,8 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
             | (0x00 << 4) // Fix Level Setting for VBD [SET TO] VSS
             | (1 << 2) // GS Transition control [SET TO] Follow LUT (NOT RED)
             | (1); // GS Transition setting for VBD [SET TO] LUT1
-        err = ssd1680_cmd_write(ctx, CMD_BorderWaveformControl, &border_waveform_ctrl, sizeof(border_waveform_ctrl));
-        if (err != ESP_OK)
-            goto cleanup;
+        err = ssd1680_cmd_write(ctx, CMD_BorderWaveformControl, border_waveform_ctrl);
+        if (err != ESP_OK) goto cleanup;
     }
 
     /* 4. Load Waveform LUT
@@ -305,31 +318,32 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
 
     {
         const uint8_t temp_sensor_selection = TEMP_SENSOR_INTERNAL;
-        err = ssd1680_cmd_write(ctx, CMD_TemperatureSensorSelection, &temp_sensor_selection, sizeof(temp_sensor_selection));
-        if (err != ESP_OK)
-            goto cleanup;
+        err = ssd1680_cmd_write(ctx, CMD_TemperatureSensorSelection, temp_sensor_selection);
+        if (err != ESP_OK) goto cleanup;
     }
 
     {
-        uint8_t display_update_ctrl[2];
-        display_update_ctrl[0] = ((RAM_BypassAs0) << 4) // Bypass Red RAM
-                | RAM_Normal; // Normal operation for BW RAM
+        uint8_t val_byte2; // TODO: find a better name
         switch (ctx->cfg.controller) {
-        case SSD1680: display_update_ctrl[1] = SSD1680_SOURCE_S8_TO_S167; break;
-        case SSD1685: display_update_ctrl[1] = SSD1685_RES_168x384; break; // TODO: select proper resolution
+        case SSD1680: val_byte2 = SSD1680_SOURCE_S8_TO_S167; break;
+        case SSD1685: val_byte2 = SSD1685_RES_168x384; break; // TODO: select proper resolution
         case SSD168x_UNKNOWN: return ESP_ERR_INVALID_STATE; // Should have been caught by ssd1680_check_controller_resolution
         }
 
-        err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl1, display_update_ctrl, sizeof(display_update_ctrl));
-        if (err != ESP_OK)
-            goto cleanup;
+        err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl1,
+            ((RAM_BypassAs0) << 4) /* Bypass Red RAM */ | RAM_Normal, // BW RAM
+            val_byte2
+        );
+        if (err != ESP_OK) goto cleanup;
     }
 
+    spi_device_release_bus(ctx->spi);
     *out_handle = ctx;
     return ESP_OK;
 
 cleanup:
     if (ctx->spi) {
+        spi_device_release_bus(ctx->spi);
         spi_bus_remove_device(ctx->spi);
         ctx->spi = NULL;
     }
@@ -343,14 +357,19 @@ esp_err_t ssd1680_deinit(ssd1680_handle_t *ctx) {
 
     esp_err_t err;
 
+    err = spi_device_acquire_bus((*ctx)->spi, portMAX_DELAY);
+    if (err != ESP_OK) goto cleanup;
+
     /* 6. Power Off
      *    • Deep sleep by Command 0x10
      */
     {
         const uint8_t deep_sleep_mode = DEEP_SLEEP_MODE_1;
-        err = ssd1680_cmd_write(*ctx, CMD_DeepSleepMode, &deep_sleep_mode, sizeof(deep_sleep_mode));
+        err = ssd1680_cmd_write(*ctx, CMD_DeepSleepMode, deep_sleep_mode);
     }
 
+cleanup:
+    spi_device_release_bus((*ctx)->spi);
     spi_bus_remove_device((*ctx)->spi);
     (*ctx)->spi = NULL;
 
@@ -369,40 +388,35 @@ esp_err_t ssd1680_flush(ssd1680_handle_t h, ssd1680_rect_t rect) {
 
     esp_err_t err;
 
+    // Acquire bus required to use SPI_TRANS_CS_KEEP_ACTIVE
+    err = spi_device_acquire_bus(h->spi, portMAX_DELAY);
+    if (err != ESP_OK) goto defer;
+
     /* Setup address auto-increment */
 
-    const uint8_t start_end_x[2] = {
+    err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_X,
         (               rect.x / 8) & 0x1f, // X start on 5 bits
         ((rect.x + rect.w - 1) / 8) & 0x1f, // X end on 5 bits
-    };
-    err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_X, start_end_x, sizeof(start_end_x));
+    );
     if (err != ESP_OK)
-        return err;
+        goto defer;
 
-    const uint8_t start_end_y[4] = {
+    err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_Y,
         (             rect.y) & 0xff, // Y start low
         (             rect.y) >>   8, // Y start high
         (rect.y + rect.h - 1) & 0xff, // Y end low
         (rect.y + rect.h - 1) >>   8, // Y end high
-    };
-    err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_Y, start_end_y, sizeof(start_end_y));
+    );
     if (err != ESP_OK)
         goto defer;
 
-    const uint8_t addr_x = rect.x / 8;
-    err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_X, &addr_x, sizeof(addr_x));
+    err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_X, rect.x / 8);
     if (err != ESP_OK)
         goto defer;
 
-    const uint8_t addr_y[2] = { rect.y & 0xff, rect.y >> 8 };
-    err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_Y, addr_y, sizeof(addr_y));
+    err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_Y, rect.y & 0xff, rect.y >> 8);
 
     /* Send framebuffer row by row */
-
-    // Acquire bus required to use SPI_TRANS_CS_KEEP_ACTIVE
-    err = spi_device_acquire_bus(h->spi, portMAX_DELAY);
-    if (err != ESP_OK)
-        goto defer;
 
     spi_transaction_t command = {
         .length = sizeof(uint8_t) * 8,
@@ -444,15 +458,16 @@ esp_err_t ssd1680_full_refresh(ssd1680_handle_t ctx) {
 
     esp_err_t err;
 
-    const uint8_t display_update_ctrl2 = 0xF7;
-    err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, &display_update_ctrl2, sizeof(display_update_ctrl2));
-    if (err != ESP_OK)
-        return err;
+    err = spi_device_acquire_bus(ctx->spi, portMAX_DELAY);
+    if (err != ESP_OK) goto defer;
 
-    err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq, NULL, 0);
-    if (err != ESP_OK)
-        return err;
+    err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, 0xF7);
+    if (err != ESP_OK) goto defer;
 
+    err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq);
+
+defer:
+    spi_device_release_bus(ctx->spi);
     return err;
 }
 
