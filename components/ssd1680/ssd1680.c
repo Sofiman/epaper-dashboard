@@ -130,24 +130,18 @@ struct ssd1680_context_t {
         ssd1680_config_t init_cfg;
     };
     spi_device_handle_t spi; // SPI device handle
+    enum RefreshMode last_refresh_mode;
 };
 
 typedef struct ssd1680_context_t ssd1680_context_t;
 
 static const char TAG[] = "ssd1680";
 
-static IRAM_ATTR void ssd1680_spi_pre_transfer_callback(spi_transaction_t *t)
-{
-    const SPI_TransactionUserData user_data = (SPI_TransactionUserData)t->user;
-    gpio_set_level(DC_PIN(user_data), DC_LEVEL(user_data));
-}
-
 struct Cmd {
     enum Command id;
     uint8_t data_len;
     uint8_t data_bytes[4];
 };
-_Static_assert(sizeof(((struct Cmd*)NULL)->data_bytes) == sizeof(((spi_transaction_t*)NULL)->tx_data));
 
 #define ssd1680_cmd_write(Handle, CmdId, ...) __ssd1680_cmd_write((Handle), (struct Cmd){ \
         .id = (CmdId), \
@@ -156,6 +150,7 @@ _Static_assert(sizeof(((struct Cmd*)NULL)->data_bytes) == sizeof(((spi_transacti
     })
 
 static esp_err_t __ssd1680_cmd_write(ssd1680_handle_t h, const struct Cmd cmd) {
+    const int has_data = cmd.data_len > 0;
     esp_err_t ret;
 
     // The SSD168x controller expects the D/C pin to be low when in sending the
@@ -170,14 +165,15 @@ static esp_err_t __ssd1680_cmd_write(ssd1680_handle_t h, const struct Cmd cmd) {
         .length = sizeof(uint8_t) * 8,
         .tx_data[0] = cmd.id,
         .user = (void*)DC_COMMAND(h->cfg.dc_pin),
-        .flags = SPI_TRANS_USE_TXDATA | (cmd.data_len > 0 ? SPI_TRANS_CS_KEEP_ACTIVE : 0)
+        .flags = SPI_TRANS_USE_TXDATA | (has_data ? SPI_TRANS_CS_KEEP_ACTIVE : 0)
     };
 
     ret = spi_device_polling_transmit(h->spi, &command);
 
     /* Send DATA if there is any */
-    if (cmd.data_len == 0 || ret != ESP_OK) return ret;
+    if (!has_data || ret != ESP_OK) return ret;
 
+    _Static_assert(sizeof(((struct Cmd*)NULL)->data_bytes) == sizeof(((spi_transaction_t*)NULL)->tx_data));
     spi_transaction_t payload = {
         .length = sizeof(uint8_t) * 8 * cmd.data_len,
         .tx_data = { cmd.data_bytes[0], cmd.data_bytes[1], cmd.data_bytes[2], cmd.data_bytes[3] },
@@ -202,6 +198,12 @@ static bool ssd1680_check_controller_resolution(ssd1680_controller_t controller,
         break;
     }
     return 0;
+}
+
+static IRAM_ATTR void ssd1680_spi_pre_transfer_callback(spi_transaction_t *t)
+{
+    const SPI_TransactionUserData user_data = (SPI_TransactionUserData)t->user;
+    gpio_set_level(DC_PIN(user_data), DC_LEVEL(user_data));
 }
 
 esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle)
