@@ -224,7 +224,8 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
             pos = bitlayout_element(&list, (bitui_point_t) { .x = COL_WIDTH, .y = COL_HEIGHT });
             s = measure_text(&FONT_SMALL, temp_str);
             pos.y += s.h/2;
-            render_text(ctx, &FONT_SMALL, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
+            uint16_t text_x = pos.x + (pos.x + COL_WIDTH / 2 < s.w / 2 ? 2 : COL_WIDTH / 2 - s.w / 2);
+            render_text(ctx, &FONT_SMALL, temp_str, text_x, pos.y);
 
             pos.y += PADDING;
             pos.y += Meteocons.yAdvance;
@@ -242,7 +243,10 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
             now = forecast->hourly.time[cur_hour];
             strftime(temp_str, sizeof(temp_str), "%H:00", localtime_r(&now, &timeinfo));
             s = measure_text(&FONT_SMALL, temp_str);
-            render_text(ctx, &FONT_SMALL, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
+            uint16_t text_x = pos.x + COL_WIDTH / 2 - s.w / 2;
+            if (text_x > pos.x + COL_WIDTH / 2 + s.w) text_x = pos.x + 2;
+            if (text_x + s.w >= SCREEN_ROWS - 2) text_x -= 3;
+            render_text(ctx, &FONT_SMALL, temp_str, text_x, pos.y);
         }
 
         pos.y += PADDING + Meteocons.yAdvance;
@@ -253,6 +257,7 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
         tmp_sprintf("%.1f", forecast->hourly.temperature_2m[cur_hour]);
         s = measure_text(&FONT_SMALL, temp_str);
         pos.y += PADDING + s.h/2;
+        assert(s.w / 2 <= pos.x + COL_WIDTH / 2 && "temp label is too wide");
         render_text(ctx, &FONT_SMALL, temp_str, pos.x + COL_WIDTH / 2 - s.w / 2, pos.y);
     }
 }
@@ -327,7 +332,7 @@ static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 
     widget_weather(ctx, data);
     widget_time(ctx, data);
-    widget_temp(ctx, 0, "TEMP", "26.3 °C");
+    widget_temp(ctx, 0, "TEMP", "26.3 C");
     widget_temp(ctx, 1, "RH", "29.4 %");
     widget_temp(ctx, 2, "CO2", "1587 ppm");
 }
