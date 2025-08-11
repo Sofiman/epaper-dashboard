@@ -92,7 +92,7 @@ enum SSD1685_ResolutionSelection : uint8_t {
     SSD1685_RES_216x384 = 0xC0,
 };
 
-enum RAMOption : uint8_t {
+enum RAMModifier : uint8_t {
     RAM_Normal = 0x0,
     RAM_BypassAs0 = 0x4,
     RAM_Inverse = 0x8,
@@ -123,13 +123,6 @@ enum DataEntryMode : uint8_t {
     DATA_ENTRY_Y_INC_X_INC = DATA_ENTRY_Y_INC | DATA_ENTRY_X_INC,
 };
 
-enum RefreshMode {
-    REFRESH_NORMAL = 0,
-    REFRESH_FAST,
-    REFRESH_PARTIAL,
-    REFRESH_UNKNOWN = -1,
-};
-
 // Context (config and data) of the spi_ssd1680
 struct ssd1680_context_t {
     union { // < Configuration by the caller.
@@ -137,7 +130,9 @@ struct ssd1680_context_t {
         ssd1680_config_t init_cfg;
     };
     spi_device_handle_t spi; // SPI device handle
-    enum RefreshMode last_refresh_mode;
+
+    int flush_to_red_ram;
+    ssd1680_refresh_mode_t refresh_mode;
 };
 
 typedef struct ssd1680_context_t ssd1680_context_t;
@@ -238,7 +233,8 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
         return ESP_ERR_NO_MEM;
 
     ctx->init_cfg = *cfg;
-    ctx->last_refresh_mode = REFRESH_UNKNOWN;
+    ctx->refresh_mode = SSD1680_REFRESH_FULL;
+    ctx->flush_to_red_ram = 0;
 
     spi_device_interface_config_t devcfg = {
         .mode = 0,
@@ -431,7 +427,7 @@ esp_err_t ssd1680_flush(ssd1680_handle_t h, ssd1680_rect_t rect) {
 
     spi_transaction_t command = {
         .length = sizeof(uint8_t) * 8,
-        .tx_data[0] = CMD_WriteRAM_BW,
+        .tx_data[0] = h->flush_to_red_ram ? CMD_WriteRAM_RED : CMD_WriteRAM_BW,
         .user = (void*)DC_COMMAND(h->cfg.dc_pin),
         .flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_CS_KEEP_ACTIVE
     };
@@ -461,68 +457,101 @@ defer:
     return err;
 }
 
-esp_err_t ssd1680_full_refresh(ssd1680_handle_t ctx) {
-    if (ctx->spi == NULL)
-        return ESP_ERR_INVALID_ARG;
-
+esp_err_t ssd1680_begin_frame(ssd1680_handle_t h, ssd1680_refresh_mode_t new_mode) {
     esp_err_t err;
 
-    err = spi_device_acquire_bus(ctx->spi, portMAX_DELAY);
-    if (err != ESP_OK) goto defer;
+    // Wait for any previous operation to finish (example: previous ssd1680_end_frame).
+    err = ssd1680_wait_until_idle(h);
+    if (err != ESP_OK) return err;
 
-    // TODO: Official example from GoodDisplay uses 0xF4.
-    // 0xF7 reloads temp+LUT everytime
-    // 0xF4 seems to reloads temp+LUT everytime.. So what is the difference?
-    err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, 0xF7);
-    if (err != ESP_OK) goto defer;
-    ctx->last_refresh_mode = REFRESH_NORMAL;
+    if (h->refresh_mode != new_mode) {
+        // Acquire bus required to use SPI_TRANS_CS_KEEP_ACTIVE
+        err = spi_device_acquire_bus(h->spi, portMAX_DELAY);
+        if (err != ESP_OK) goto defer;
 
-    err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq);
+        err = ssd1680_cmd_write(h, CMD_DisplayUpdateControl1,
+                ((new_mode == SSD1680_REFRESH_PARTIAL ? RAM_Normal : RAM_BypassAs0) << 4) // RED RAM
+                    | RAM_Normal, // BW RAM
+                SSD1685_RES_168x384,
+            );
+        if (err != ESP_OK) goto defer;
 
-defer:
-    spi_device_release_bus(ctx->spi);
+        if (new_mode == SSD1680_REFRESH_FAST) {
+            // E-ink particles slower at lower temperatures and quicker at
+            // higher temperatures. Thus, we can trick the controller to use
+            // waveforms designed for higher temperature to have less refresh
+            // cycles and a faster full refresh.
+            // More detailed explanation: https://github.com/adafruit/Adafruit_EPD/issues/50#issuecomment-2692173758
+
+            // Set the display's current temperature to +110 C (0x6E)
+            err = ssd1680_cmd_write(h, CMD_WriteTemperatureRegister, 0x6E);
+            if (err != ESP_OK) goto defer;
+
+            // Load LUT with Display Mode 1 matching the new temperature value.
+            err = ssd1680_cmd_write(h, CMD_DisplayUpdateControl2, 0x91);
+            if (err != ESP_OK) goto defer;
+
+            // Trigger the loading of the LUT while the user is drawing UI.
+            err = ssd1680_cmd_write(h, CMD_MasterActivationUpdateSeq);
+        }
+
+    defer:
+        spi_device_release_bus(h->spi);
+        if (err != ESP_OK) return err;
+
+        // ssd1680_flush locks the SPI bus again
+        if (new_mode == SSD1680_REFRESH_PARTIAL) {
+            // More detailed explanation: https://github.com/adafruit/Adafruit_EPD/issues/50#issuecomment-2692179474
+            // The partial refresh or Display Mode 2 will update the pixels
+            // depending on the diff between the BW ram (new) and RED ram (old).
+
+            // Write previous framebuffer to RED RAM
+            h->flush_to_red_ram = 1;
+            err = ssd1680_flush(h, (ssd1680_rect_t){ .x = 0, .y = 0, .w = h->cfg.cols, .h = h->cfg.rows });
+            h->flush_to_red_ram = 0;
+        }
+    }
+
+    h->refresh_mode = new_mode;
     return err;
 }
 
-esp_err_t ssd1680_fast_refresh(ssd1680_handle_t ctx) {
-    if (ctx->spi == NULL)
-        return ESP_ERR_INVALID_ARG;
-
+esp_err_t ssd1680_end_frame(ssd1680_handle_t h) {
     esp_err_t err;
 
-    err = spi_device_acquire_bus(ctx->spi, portMAX_DELAY);
+    // Wait for any previous operation to finish (example: SSD1680_REFRESH_FAST LUT load).
+    err = ssd1680_wait_until_idle(h);
+    if (err != ESP_OK) return err;
+
+    // Acquire bus required to use SPI_TRANS_CS_KEEP_ACTIVE
+    err = spi_device_acquire_bus(h->spi, portMAX_DELAY);
     if (err != ESP_OK) goto defer;
 
-    if (ctx->last_refresh_mode != REFRESH_FAST) {
-        // Explanation: https://github.com/adafruit/Adafruit_EPD/issues/50#issuecomment-2692173758
-        err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl1,
-            ((RAM_BypassAs0) << 4) | RAM_Normal, // BW RAM
-            SSD1685_RES_168x384,
-        );
-        if (err != ESP_OK) goto defer;
-
-        err = ssd1680_cmd_write(ctx, CMD_WriteTemperatureRegister, 0x6E); // 110C
-        if (err != ESP_OK) goto defer;
-
-        err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, 0x91); // Load corresponding LUT
-        if (err != ESP_OK) goto defer;
-
-        err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq);
-        if (err != ESP_OK) goto defer;
-
-        err = ssd1680_wait_until_idle(ctx);
-        if (err != ESP_OK) goto defer;
-
-        ctx->last_refresh_mode = REFRESH_FAST;
+    uint8_t display_update_control2 = 0x01;
+    switch (h->refresh_mode) {
+        case SSD1680_REFRESH_FAST:
+            // Same as 0xF7 but do not load temperature value because we use
+            // our own temperature value to trick the controller.
+            display_update_control2 = 0xC7;
+            break;
+        case SSD1680_REFRESH_FULL:
+            // TODO: Official example from GoodDisplay uses 0xF4 -> need to investigate
+            display_update_control2 = 0xF7;
+            break;
+        case SSD1680_REFRESH_PARTIAL:
+            // TODO: Official example from GoodDisplay uses 0xDF -> need to investigate
+            // Same as 0xF7 but uses Display mode 2
+            display_update_control2 = 0xFF;
+            break;
     }
 
-    err = ssd1680_cmd_write(ctx, CMD_DisplayUpdateControl2, 0xC7);
+    err = ssd1680_cmd_write(h, CMD_DisplayUpdateControl2, display_update_control2);
     if (err != ESP_OK) goto defer;
 
-    err = ssd1680_cmd_write(ctx, CMD_MasterActivationUpdateSeq);
+    err = ssd1680_cmd_write(h, CMD_MasterActivationUpdateSeq);
 
 defer:
-    spi_device_release_bus(ctx->spi);
+    spi_device_release_bus(h->spi);
     return err;
 }
 
@@ -530,6 +559,7 @@ esp_err_t ssd1680_wait_until_idle(ssd1680_handle_t ctx) {
     if (ctx->spi == NULL)
         return ESP_ERR_INVALID_ARG;
 
+    // TODO: Use FreeRTOS to eliminate the busy loop
     while (gpio_get_level(ctx->cfg.busy_pin)) {
         vTaskDelay(1 / portTICK_PERIOD_MS);
     }

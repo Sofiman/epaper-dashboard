@@ -55,9 +55,14 @@ typedef struct {
     uint16_t h;
 } ssd1680_rect_t;
 
-esp_err_t ssd1680_flush(ssd1680_handle_t handle, ssd1680_rect_t rect);
+typedef enum {
+    SSD1680_REFRESH_FULL,
+    SSD1680_REFRESH_FAST,
+    SSD1680_REFRESH_PARTIAL,
+} ssd1680_refresh_mode_t;
 
-esp_err_t ssd1680_full_refresh(ssd1680_handle_t handle);
-esp_err_t ssd1680_fast_refresh(ssd1680_handle_t handle);
+esp_err_t ssd1680_begin_frame(ssd1680_handle_t handle, ssd1680_refresh_mode_t mode);
+esp_err_t ssd1680_flush(ssd1680_handle_t handle, ssd1680_rect_t rect);
+esp_err_t ssd1680_end_frame(ssd1680_handle_t handle);
 
 esp_err_t ssd1680_wait_until_idle(ssd1680_handle_t handle);
