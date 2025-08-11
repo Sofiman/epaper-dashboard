@@ -23,7 +23,7 @@ enum Command : uint8_t {
     CMD_WriteRegisterForInitialCodeSetting = 0x09,
     CMD_ReadRegisterForInitialCodeSetting = 0x0A,
     CMD_BoosterSoftStartControl = 0x0C,
-    CMD_GateScanStartPosition = 0x0F, // not available on SSD1685
+    CMD_GateScanStartPosition = 0x0F,
     CMD_DeepSleepMode = 0x10,
     CMD_DataEntryModeSetting = 0x11,
     CMD_SWReset = 0x12,

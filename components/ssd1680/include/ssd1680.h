@@ -58,5 +58,6 @@ typedef struct {
 esp_err_t ssd1680_flush(ssd1680_handle_t handle, ssd1680_rect_t rect);
 
 esp_err_t ssd1680_full_refresh(ssd1680_handle_t handle);
+esp_err_t ssd1680_fast_refresh(ssd1680_handle_t handle);
 
 esp_err_t ssd1680_wait_until_idle(ssd1680_handle_t handle);
