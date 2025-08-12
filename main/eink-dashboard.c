@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "driver/spi_master.h"
@@ -240,12 +241,15 @@ void init_devices() {
         .data6_io_num = -1,
         .data7_io_num = -1,
         .flags = SPICOMMON_BUSFLAG_MASTER,
+        .max_transfer_sz = 8912,
     };
     //Initialize the SPI bus
     ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "Initializing SSD1680...");
+
+    int64_t start = esp_timer_get_time();
     ret = ssd1680_init(&(ssd1680_config_t) {
         .controller = SSD1685,
         .host = SPI2_HOST,
@@ -258,6 +262,8 @@ void init_devices() {
         .cols = SCREEN_COLS,
         .framebuffer = framebuffer
     }, &ssd1680_handle);
+    int64_t end = esp_timer_get_time();
+    ESP_LOGD(TAG, "ssd1680_init took %lldus\n", end-start);
     ESP_ERROR_CHECK(ret);
 }
 
@@ -342,7 +348,13 @@ static void decode_weather(esp_tls_t *tls_session) {
     if (src.remainder.head != NULL) {
         src.remainder.head += sizeof(HTTP_HEAD_END) - 1;
         struct Forecast *out = &gui_data.forecast;
-        if (!json_deserialize_object(&src, (void**)&out, forecast_schema)) {
+
+        int64_t start = esp_timer_get_time();
+        int res = json_deserialize_object(&src, (void**)&out, forecast_schema);
+        int64_t end = esp_timer_get_time();
+        ESP_LOGD(TAG, "json_deserialize_object took %lldus", end-start);
+
+        if (!res) {
             ESP_LOGE(TAG, "Failed to deserialize forecast\n");
             ESP_LOGE(TAG, " %zu:%zu  | %.*s\n", src.line, json_source_column(&src), (int)(src.remainder.tail - src.remainder.head), src.remainder.head);
         } else {
@@ -354,7 +366,7 @@ static void decode_weather(esp_tls_t *tls_session) {
             }
             ESP_LOGD(TAG, "]");
 
-            ESP_LOGI(TAG, "forecast.daily=[");
+            ESP_LOGD(TAG, "forecast.daily=[");
             for (int i = 0; i < FORECAST_DURATION_DAYS; i++) {
                 ESP_LOGD(TAG, "\ttime[%d] = %lld\tsunrise[%d] = %lld\tsunset[%d] = %lld,", i, gui_data.forecast.daily.time[i], i, gui_data.forecast.daily.sunrise[i], i, gui_data.forecast.daily.sunset[i]);
             }
@@ -366,29 +378,46 @@ static void decode_weather(esp_tls_t *tls_session) {
     }
 }
 
-static void render_gui(bitui_t ctx) {
-    gui_render(ctx, &gui_data);
+static void gui_tick(bitui_t ctx) {
+    esp_err_t ret;
+    int64_t start, end;
+    static int updates = 0;
 
-    esp_err_t ret = ssd1680_wait_until_idle(ssd1680_handle);
+    start = esp_timer_get_time();
+    ret = ssd1680_begin_frame(ssd1680_handle, updates == 0 ? SSD1680_REFRESH_FULL : SSD1680_REFRESH_PARTIAL);
+    end = esp_timer_get_time();
+    ESP_LOGD(TAG, "ssd1680_begin_frame(%d) took %lldus\n", updates, end-start);
     ESP_ERROR_CHECK(ret);
+
+    if (updates == 0) updates = 5;
+    updates--;
+
+    start = esp_timer_get_time();
+    gui_render(ctx, &gui_data);
+    end = esp_timer_get_time();
+    ESP_LOGD(TAG, "gui_render took %lldus\n", end-start);
+
+    start = esp_timer_get_time();
     ret = ssd1680_flush(ssd1680_handle, (ssd1680_rect_t){
         .x = 0, .y = 0,
         .w = SCREEN_COLS, .h = SCREEN_ROWS
     });
+    end = esp_timer_get_time();
+    ESP_LOGD(TAG, "ssd1680_flush took %lldus\n", end-start);
     ESP_ERROR_CHECK(ret);
-    ret = ssd1680_full_refresh(ssd1680_handle);
+
+    start = esp_timer_get_time();
+    ret = ssd1680_end_frame(ssd1680_handle);
+    end = esp_timer_get_time();
+    ESP_LOGD(TAG, "ssd1680_end_frame took %lldus\n", end-start);
     ESP_ERROR_CHECK(ret);
+    return;
 }
 
-void app_main(void)
+#define TZ_EUROPE_PARIS "CET-1CEST,M3.5.0,M10.5.0/3"
+
+void vTask_gui_tick(void * pvParameters)
 {
-    esp_err_t ret;
-
-    init_devices();
-
-    setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
-    tzset();
-
     bitui_handle = (bitui_ctx_t){
         .width = SCREEN_COLS,
         .height = SCREEN_ROWS,
@@ -399,23 +428,62 @@ void app_main(void)
     };
 
     bitui_t ctx = &bitui_handle;
+    typeof(gui_data) old_gui_data = gui_data;
 
-    render_gui(ctx);
+    gui_tick(ctx);
 
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = 350; // ms
+    BaseType_t xWasDelayed;
+
+    xLastWakeTime = xTaskGetTickCount();
+    int64_t start, end;
+    for (;;)
+    {
+        xWasDelayed = xTaskDelayUntil(&xLastWakeTime, xFrequency);
+        ESP_LOGD(TAG, "!!!!!!!!!!!!!!!!!!!!!! xWasDelayed = %d\n", xWasDelayed);
+
+        /*if (memcmp((void*)&old_gui_data, (void*)&gui_data, sizeof(gui_data)) != 0) {
+            gui_data.tick = 0;
+            old_gui_data = gui_data;
+        }*/
+        gui_data.tick++;
+        start = esp_timer_get_time();
+        gui_tick(ctx);
+        end = esp_timer_get_time();
+
+        ESP_LOGD(TAG, "gui_tick took %lldus\n", end-start);
+        // Perform action here. xWasDelayed value can be used to determine
+        // whether a deadline was missed if the code here took too long.
+    }
+}
+
+static TaskHandle_t xTask_gui_tick = NULL;
+
+void app_main(void)
+{
+    esp_err_t ret;
+
+    init_devices();
+
+    setenv("TZ", TZ_EUROPE_PARIS, 1);
+    tzset();
+
+    xTaskCreate(vTask_gui_tick, "gui_tick", 4096, NULL, 5, &xTask_gui_tick);
+
+    gui_data.tick = 0;
     gui_data.current_screen = GUI_WIFI_INIT;
-    render_gui(ctx);
     wifi_init_sta();
     esp_netif_sntp_start();
     ESP_ERROR_CHECK(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000))); // 10s
 
+    gui_data.tick = 0;
     gui_data.forecast.updated_at = 0;
     gui_data.current_screen = GUI_HOME;
 
-    render_gui(ctx);
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
 
     https_get_request(WEATHER_WEB_URL, WEATHER_REQUEST, decode_weather);
-
-    render_gui(ctx);
 
     vTaskDelay(100 / portTICK_PERIOD_MS);
 
@@ -424,6 +492,11 @@ void app_main(void)
 
     esp_netif_sntp_deinit();
 
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    if (xTask_gui_tick) {
+        vTaskDelete(xTask_gui_tick);
+        xTask_gui_tick = NULL;
+    }
     ret = ssd1680_wait_until_idle(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
     ret = ssd1680_deinit(&ssd1680_handle);

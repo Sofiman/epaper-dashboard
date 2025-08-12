@@ -4,6 +4,7 @@ idf_component_register(SRCS "eink-dashboard.c"
                     REQUIRES esp_driver_gpio
                     REQUIRES esp_wifi
                     REQUIRES esp-tls
+                    REQUIRES esp_timer
 
                     REQUIRES ssd1680
                     REQUIRES bitui
