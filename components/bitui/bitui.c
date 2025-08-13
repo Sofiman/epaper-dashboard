@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <string.h>
 
+#define SWAP_XY // Correct pixel format for SSD1680
+
 #define SWAP_U16(A,B) do { \
     uint16_t __tmp = (A); \
     (A) = (B); \
@@ -9,7 +11,13 @@
 } while (0)
 
 void bitui_clear(bitui_t ctx, bool color) {
-    memset(ctx->framebuffer, color ? 0xff : 0, ctx->stride * ctx->height);
+    size_t count;
+#ifndef SWAP_XY
+    count = ctx->stride * ctx->height;
+#else
+    count = ctx->stride * ctx->width;
+#endif
+    memset(ctx->framebuffer, color ? 0xff : 0, count);
 }
 
 static inline void bitui_merge_rect(bitui_rect_t *dst, const bitui_rect_t src) {
@@ -56,15 +64,30 @@ bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
     return point;
 }
 
+#ifndef SWAP_XY
+#define ROW_AT(X, Y) (Y)
+#define STRIDE(Ctx) (ctx->stride)
+#define COL_AT(X, Y) ((X)/8)
+#define BIT_AT(X, Y) (0x80 >> ((X) & 7))
+#else
+#define ROW_AT(X, Y) ((Y)/8)
+#define STRIDE(Ctx) (ctx->width)
+#define COL_AT(X, Y) (X)
+#define BIT_AT(X, Y) (0x80 >> ((Y) & 7))
+#endif
+#define IDX_AT(Ctx, X, Y) (ROW_AT(X, Y) * STRIDE(Ctx) + COL_AT(X, Y))
+
 void bitui_point(bitui_t ctx, uint16_t x, uint16_t y) {
     bitui_point_t p = bitui_apply_rot(ctx, (bitui_point_t){ .x = x, .y = y });
     x = p.x; y = p.y;
 
     if (x >= ctx->width || y >= ctx->height)
         return;
-    bitui_colorize(ctx, y * ctx->stride + x/8, 0x80 >> (x & 7));
+
+    bitui_colorize(ctx, IDX_AT(ctx, x, y), BIT_AT(x, y));
 }
 
+#ifndef SWAP_XY
 void bitui_hline(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
     if (x1 > x2) SWAP_U16(x1, x2);
 
@@ -123,6 +146,48 @@ void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2)
         bitui_colorize(ctx, y1 * s + col, mask);
     }
 }
+#else
+void bitui_vline(bitui_t ctx, const uint16_t x, uint16_t y1, uint16_t y2) {
+    if (y1 > y2) SWAP_U16(y1, y2);
+
+    // TODO : bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = x1, .y = y, .w = x2-x1, .h = 1 });
+    // [not aligned][aligned][not aligned]
+
+    uint16_t y1_aligned = y1 / 8;
+    const uint16_t y1_rem = y1 & 7;
+    const uint16_t y2_aligned = y2 / 8;
+    const uint16_t y2_rem = y2 & 7;
+    if (y1_aligned == y2_aligned) {
+        uint8_t mask = (0xff >> y1_rem) & ~(0xff >> y2_rem);
+        bitui_colorize(ctx, y1_aligned * ctx->width + x, mask);
+    } else {
+        uint8_t mask = (0xff >> y1_rem);
+        bitui_colorize(ctx, y1_aligned * ctx->width + x, mask);
+        y1_aligned += 1;
+
+        const uint8_t fill = ctx->color ? 0xff : 0x00;
+        for (; y1_aligned < y2_aligned; ++y1_aligned) {
+            ctx->framebuffer[y1_aligned * ctx->width + x] = fill;
+        }
+
+        if (y2_rem) {
+            mask = ~(0xff >> y2_rem);
+            bitui_colorize(ctx, y1_aligned * ctx->width + x, mask);
+        }
+    }
+}
+
+void bitui_hline(bitui_t ctx, uint16_t y, uint16_t x1, uint16_t x2)
+{
+    if (x1 > x2) SWAP_U16(x1, x2);
+
+    // TODO: bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = x, .y = y1, .w = 1, .h = y2-y1 });
+
+    for (; x1 <= x2; ++x1) {
+        bitui_colorize(ctx, IDX_AT(ctx, x1, y), BIT_AT(x1, y));
+    }
+}
+#endif
 
 void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
 {
