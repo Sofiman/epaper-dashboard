@@ -27,26 +27,34 @@ typedef enum {
     SSD1680_WHITE = 1,
 } ssd1680_color_t;
 
+typedef enum {
+    SSD1680_ROT_000 = 0, // FPC Connector to the right. Upper left corner is opposite to the FPC Connector.
+    SSD1680_ROT_090,     // TODO: Image is corrupted. Controller can only manipulate bytes, not bits
+    SSD1680_ROT_180,     // FPC Connector to the left. Upper left corner is next to the FPC Connector.
+    SSD1680_ROT_270,     // TODO: Image is corrupted. Controller can only manipulate bytes, not bits
+} ssd1680_rotation_t;
+
 /// Configurations of the spi_ssd1680
 typedef struct {
     ssd1680_controller_t controller;
+    ssd1680_rotation_t rotation;
     uint16_t cols;
     uint16_t rows;
+    const uint8_t *framebuffer;
 
     spi_host_device_t host; ///< The SPI host used, set before calling `spi_ssd1680_init()`
     gpio_num_t cs_pin;       ///< CS gpio number, set before calling `spi_ssd1680_init()`
     gpio_num_t dc_pin;     ///< D/C gpio number, set before calling `spi_ssd1680_init()`
     gpio_num_t busy_pin;     ///< BUSY gpio number, set before calling `spi_ssd1680_init()`
     gpio_num_t reset_pin;     ///< RESET gpio number, set before calling `spi_ssd1680_init()`
-
-    uint8_t *framebuffer;
 } ssd1680_config_t;
 
 typedef struct ssd1680_context_t* ssd1680_handle_t;
 
 esp_err_t ssd1680_init(const ssd1680_config_t *config, ssd1680_handle_t* out_handle);
-
 esp_err_t ssd1680_deinit(ssd1680_handle_t *ctx);
+
+esp_err_t ssd1680_set_rotation(ssd1680_handle_t handle, ssd1680_rotation_t rotation);
 
 typedef struct {
     uint16_t x;

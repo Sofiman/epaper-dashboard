@@ -103,31 +103,35 @@ enum TemperatureSensorSelection : uint8_t {
     TEMP_SENSOR_EXTERNAL = 0x48,
 };
 
-// Set the direction in which the address counter is updated automatically after
-// data are written to the RAM.
-enum AM : uint8_t {
-    // the address counter is updated in the X direction
-    AM_X = 0,
-    // the address counter is updated in the Y direction
-    AM_Y = 1,
-};
-
-// Address automatic increment / decrement
 enum DataEntryMode : uint8_t {
-    DATA_ENTRY_X_INC = 0x1,
-    DATA_ENTRY_Y_INC = 0x2,
+    //                                                  AM  ID
+    // Lines are in the X axis. (width = config.cols, height = config.rows)
+    DATA_ENTRY_RIGHT_TO_LEFT_THEN_BOTTOM_TO_TOP = 0, //  0  00
+    DATA_ENTRY_LEFT_TO_RIGHT_THEN_BOTTOM_TO_TOP,     //  0  01
+    DATA_ENTRY_RIGHT_TO_LEFT_THEN_TOP_TO_BOTTOM,     //  0  10
+    DATA_ENTRY_LEFT_TO_RIGHT_THEN_TOP_TO_BOTTOM,     //  0  11
 
-    DATA_ENTRY_Y_DEC_X_DEC = 0,
-    DATA_ENTRY_Y_DEC_X_INC = DATA_ENTRY_X_INC,
-    DATA_ENTRY_Y_INC_X_DEC = DATA_ENTRY_Y_INC,
-    DATA_ENTRY_Y_INC_X_INC = DATA_ENTRY_Y_INC | DATA_ENTRY_X_INC,
+    // Lines are in the Y axis. (width = config.rows, height = config.cols)
+    DATA_ENTRY_BOTTOM_TO_TOP_THEN_RIGHT_TO_LEFT,     //  1  00
+    DATA_ENTRY_BOTTOM_TO_TOP_THEN_LEFT_TO_RIGHT,     //  1  01
+    DATA_ENTRY_TOP_TO_BOTTOM_THEN_RIGHT_TO_LEFT,     //  1  10
+    DATA_ENTRY_TOP_TO_BOTTOM_THEN_LEFT_TO_RIGHT,     //  1  11
+};
+#define IS_DATA_ENTRY_MODE_LEFT_TO_RIGHT(Mode) ((Mode)&1)
+#define IS_DATA_ENTRY_MODE_TOP_TO_BOTTOM(Mode) ((Mode)&2)
+
+static const enum DataEntryMode ROTATION_TO_DATA_ENTRY[] = {
+    [SSD1680_ROT_000] = DATA_ENTRY_LEFT_TO_RIGHT_THEN_TOP_TO_BOTTOM,
+    [SSD1680_ROT_090] = DATA_ENTRY_TOP_TO_BOTTOM_THEN_RIGHT_TO_LEFT,
+    [SSD1680_ROT_180] = DATA_ENTRY_RIGHT_TO_LEFT_THEN_BOTTOM_TO_TOP,
+    [SSD1680_ROT_270] = DATA_ENTRY_BOTTOM_TO_TOP_THEN_LEFT_TO_RIGHT,
 };
 
 // Context (config and data) of the spi_ssd1680
 struct ssd1680_context_t {
     union { // < Configuration by the caller.
         const ssd1680_config_t cfg;
-        ssd1680_config_t init_cfg;
+        ssd1680_config_t mut_cfg;
     };
     spi_device_handle_t spi; // SPI device handle
 
@@ -232,7 +236,7 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
     if (ctx == NULL)
         return ESP_ERR_NO_MEM;
 
-    ctx->init_cfg = *cfg;
+    ctx->mut_cfg = *cfg;
     ctx->refresh_mode = SSD1680_REFRESH_FULL;
     ctx->flush_to_red_ram = 0;
 
@@ -301,10 +305,7 @@ esp_err_t ssd1680_init(const ssd1680_config_t *cfg, ssd1680_handle_t* out_handle
     }
 
     {
-        const uint8_t data_entry_setting = (AM_X << 2)
-            | DATA_ENTRY_Y_INC_X_INC; // Increment X, at the end of the line, increment Y
-
-        err = ssd1680_cmd_write(ctx, CMD_DataEntryModeSetting, data_entry_setting);
+        err = ssd1680_cmd_write(ctx, CMD_DataEntryModeSetting, ROTATION_TO_DATA_ENTRY[cfg->rotation]);
         if (err != ESP_OK) goto cleanup;
     }
 
@@ -385,6 +386,28 @@ cleanup:
     return err;
 }
 
+esp_err_t ssd1680_set_rotation(ssd1680_handle_t h, ssd1680_rotation_t rotation) {
+    esp_err_t err;
+
+    // Acquire bus required to use SPI_TRANS_CS_KEEP_ACTIVE
+    err = spi_device_acquire_bus(h->spi, portMAX_DELAY);
+    if (err != ESP_OK) goto defer;
+
+    err = ssd1680_cmd_write(h, CMD_DataEntryModeSetting, ROTATION_TO_DATA_ENTRY[rotation]);
+    if (err != ESP_OK) goto defer;
+    h->mut_cfg.rotation = rotation;
+
+defer:
+    spi_device_release_bus(h->spi);
+    return err;
+}
+
+#define SWAP(A, B) do { \
+    typeof(A) tmp = A; \
+    A = B; \
+    B = tmp; \
+} while (0)
+
 esp_err_t ssd1680_flush(ssd1680_handle_t h, ssd1680_rect_t rect) {
     if (h->spi == NULL)
         return ESP_ERR_INVALID_ARG;
@@ -399,29 +422,42 @@ esp_err_t ssd1680_flush(ssd1680_handle_t h, ssd1680_rect_t rect) {
     err = spi_device_acquire_bus(h->spi, portMAX_DELAY);
     if (err != ESP_OK) goto defer;
 
+    const enum DataEntryMode data_entry_mode =
+        ROTATION_TO_DATA_ENTRY[h->cfg.rotation];
+
     /* Setup address auto-increment */
+    {
+        uint8_t start_x = rect.x / 8;
+        uint8_t end_x = (rect.x + rect.w - 1) / 8;
+        if (!IS_DATA_ENTRY_MODE_LEFT_TO_RIGHT(data_entry_mode))
+            SWAP(start_x, end_x);
 
-    err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_X,
-        (               rect.x / 8) & 0x1f, // X start on 5 bits
-        ((rect.x + rect.w - 1) / 8) & 0x1f, // X end on 5 bits
-    );
-    if (err != ESP_OK)
-        goto defer;
+        err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_X, start_x);
+        if (err != ESP_OK)
+            goto defer;
 
-    err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_Y,
-        (             rect.y) & 0xff, // Y start low
-        (             rect.y) >>   8, // Y start high
-        (rect.y + rect.h - 1) & 0xff, // Y end low
-        (rect.y + rect.h - 1) >>   8, // Y end high
-    );
-    if (err != ESP_OK)
-        goto defer;
+        err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_X, start_x, end_x);
+        if (err != ESP_OK)
+            goto defer;
+    }
 
-    err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_X, rect.x / 8);
-    if (err != ESP_OK)
-        goto defer;
+    {
+        uint16_t start_y = rect.y;
+        uint16_t end_y = rect.y + rect.h - 1;
+        if (!IS_DATA_ENTRY_MODE_TOP_TO_BOTTOM(data_entry_mode))
+            SWAP(start_y, end_y);
 
-    err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_Y, rect.y & 0xff, rect.y >> 8);
+        err = ssd1680_cmd_write(h, CMD_SetRAM_Counter_Y,
+                start_y & 0xff, start_y >> 8);
+        if (err != ESP_OK)
+            goto defer;
+
+        err = ssd1680_cmd_write(h, CMD_SetRAM_StartEnd_Y,
+                start_y & 0xff, start_y >> 8,
+                end_y & 0xff, end_y >> 8);
+        if (err != ESP_OK)
+            goto defer;
+    }
 
     /* Send framebuffer row by row */
 
