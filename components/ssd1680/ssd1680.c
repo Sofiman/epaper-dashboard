@@ -529,13 +529,11 @@ esp_err_t ssd1680_begin_frame(ssd1680_handle_t h, ssd1680_refresh_mode_t new_mod
 
             // Trigger the loading of the LUT while the user is drawing UI.
             err = ssd1680_cmd_write(h, CMD_MasterActivationUpdateSeq);
+            if (err != ESP_OK) goto defer;
         }
 
-    defer:
-        spi_device_release_bus(h->spi);
-        if (err != ESP_OK) return err;
+        spi_device_release_bus(h->spi); // ssd1680_flush locks the SPI bus again
 
-        // ssd1680_flush locks the SPI bus again
         if (new_mode == SSD1680_REFRESH_PARTIAL) {
             // More detailed explanation: https://github.com/adafruit/Adafruit_EPD/issues/50#issuecomment-2692179474
             // The partial refresh or Display Mode 2 will update the pixels
@@ -550,6 +548,9 @@ esp_err_t ssd1680_begin_frame(ssd1680_handle_t h, ssd1680_refresh_mode_t new_mod
 
     h->refresh_mode = new_mode;
     return err;
+defer:
+   spi_device_release_bus(h->spi);
+   return err;
 }
 
 esp_err_t ssd1680_end_frame(ssd1680_handle_t h) {
