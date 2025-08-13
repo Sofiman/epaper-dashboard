@@ -252,6 +252,7 @@ void init_devices() {
     int64_t start = esp_timer_get_time();
     ret = ssd1680_init(&(ssd1680_config_t) {
         .controller = SSD1685,
+        .rotation = SSD1680_ROT_270,
         .host = SPI2_HOST,
         .busy_pin = GPIO_NUM_0,
         .reset_pin = GPIO_NUM_1,
@@ -411,7 +412,6 @@ static void gui_tick(bitui_t ctx) {
     end = esp_timer_get_time();
     ESP_LOGD(TAG, "ssd1680_end_frame took %lldus\n", end-start);
     ESP_ERROR_CHECK(ret);
-    return;
 }
 
 #define TZ_EUROPE_PARIS "CET-1CEST,M3.5.0,M10.5.0/3"
@@ -419,11 +419,11 @@ static void gui_tick(bitui_t ctx) {
 void vTask_gui_tick(void * pvParameters)
 {
     bitui_handle = (bitui_ctx_t){
-        .width = SCREEN_COLS,
-        .height = SCREEN_ROWS,
+        .width = SCREEN_ROWS,
+        .height = SCREEN_COLS,
         .stride = SCREEN_STRIDE,
         .framebuffer = framebuffer,
-        .rot = BITUI_ROT_090,
+        //.rot = BITUI_ROT_090,
         .color = true,
     };
 

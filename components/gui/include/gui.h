@@ -6,8 +6,8 @@
 #include <esp_netif.h>
 
 #define SCREEN_COLS 168
-#define SCREEN_STRIDE ((SCREEN_COLS - 1) / 8 + 1)
 #define SCREEN_ROWS 384
+#define SCREEN_STRIDE ((SCREEN_COLS - 1) / 8 + 1)
 
 #define FORECAST_DURATION_DAYS 2
 #define FORECAST_HOURLY_POINT_COUNT FORECAST_DURATION_DAYS * 24
