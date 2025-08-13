@@ -50,6 +50,14 @@ static inline void bitui_colorize(bitui_t ctx, uint16_t offset, uint8_t updated_
     ctx->framebuffer[offset] = temp;
 }
 
+#ifdef BITUI_ROTATION
+#define bitui_rotate(Ctx, X, Y) do { \
+    bitui_point_t p = { .x = *(X), .y = *(Y) }; \
+    p = bitui_apply_rot((Ctx), p); \
+    *(X) = p.x; \
+    *(Y) = p.y; \
+} while (0);
+
 bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
     _Static_assert(BITUI_ROT_270 == (BITUI_ROT_090 | BITUI_ROT_180), "Rotation bitwise composition");
     if (ctx->rot & BITUI_ROT_090) {
@@ -63,6 +71,9 @@ bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
     }
     return point;
 }
+#else
+#define bitui_rotate(Ctx, X, Y)
+#endif
 
 #ifndef SWAP_XY
 #define ROW_AT(X, Y) (Y)
@@ -78,8 +89,7 @@ bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
 #define IDX_AT(Ctx, X, Y) (ROW_AT(X, Y) * STRIDE(Ctx) + COL_AT(X, Y))
 
 void bitui_point(bitui_t ctx, uint16_t x, uint16_t y) {
-    bitui_point_t p = bitui_apply_rot(ctx, (bitui_point_t){ .x = x, .y = y });
-    x = p.x; y = p.y;
+    bitui_rotate(ctx, &x, &y);
 
     if (x >= ctx->width || y >= ctx->height)
         return;
@@ -191,13 +201,8 @@ void bitui_hline(bitui_t ctx, uint16_t y, uint16_t x1, uint16_t x2)
 
 void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
 {
-    bitui_point_t p;
-
-    p = bitui_apply_rot(ctx, (bitui_point_t){ .x = x1, .y = y1 });
-    x1 = p.x; y1 = p.y;
-
-    p = bitui_apply_rot(ctx, (bitui_point_t){ .x = x2, .y = y2 });
-    x2 = p.x; y2 = p.y;
+    bitui_rotate(ctx, &x1, &y1);
+    bitui_rotate(ctx, &x2, &y2);
 
     if (x1 == x2) bitui_vline(ctx, x1, y1, y2);
     else if (y1 == y2) bitui_hline(ctx, y1, x1, x2);
