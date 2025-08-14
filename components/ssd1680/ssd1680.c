@@ -13,7 +13,7 @@ _Static_assert(sizeof(SPI_TransactionUserData) <= sizeof(((spi_transaction_t*)NU
 
 // MAX CLK freq in WRITE mode:  20 Mhz
 // MAX CLK freq in  READ mode: 2.5 Mhz
-#define SSD1680_CLK_FREQ 2 * 1000 * 1000 /* 2Mhz*/
+#define SSD1680_CLK_FREQ 16 * 1000 * 1000 /* 16Mhz*/
 
 enum Command : uint8_t {
     CMD_DriverOutputControl = 0x01,
@@ -471,21 +471,32 @@ esp_err_t ssd1680_flush(ssd1680_handle_t h, ssd1680_rect_t rect) {
     err = spi_device_polling_transmit(h->spi, &command);
     if (err != ESP_OK) goto defer;
 
-    const size_t row_stride = (h->cfg.cols - 1) / 8 + 1;
-    spi_transaction_t payload = {
-        .length = h->cfg.cols, // TODO: Incorrect when rect is a smaller window
-        .tx_buffer = h->cfg.framebuffer,
-        .user = (void*)DC_DATA(h->cfg.dc_pin),
-        .flags = SPI_TRANS_CS_KEEP_ACTIVE
-    };
-
-    for (uint16_t row = 0; row < h->cfg.rows; ++row) {
-        payload.tx_buffer = &h->cfg.framebuffer[row * row_stride]; // TODO: Incorrect when rect is a smaller window
-        if (row + 1 == h->cfg.rows) payload.flags = 0;
+    if (rect.x == 0 && rect.y == 0 && rect.w == h->cfg.cols && rect.h == h->cfg.rows) {
+        spi_transaction_t payload = {
+            .length = h->cfg.rows * h->cfg.cols,
+            .tx_buffer = h->cfg.framebuffer,
+            .user = (void*)DC_DATA(h->cfg.dc_pin),
+            .flags = SPI_TRANS_CS_KEEP_ACTIVE
+        };
 
         err = spi_device_polling_transmit(h->spi, &payload);
-        if (err != ESP_OK)
-            goto defer;
+    } else {
+        const size_t row_stride = (h->cfg.cols - 1) / 8 + 1;
+        spi_transaction_t payload = {
+            .length = h->cfg.cols, // TODO: Incorrect when rect is a smaller window
+            .tx_buffer = h->cfg.framebuffer,
+            .user = (void*)DC_DATA(h->cfg.dc_pin),
+            .flags = SPI_TRANS_CS_KEEP_ACTIVE
+        };
+
+        for (uint16_t row = 0; row < h->cfg.rows; ++row) { // TODO: Incorrect when rect is a smaller window
+            payload.tx_buffer = &h->cfg.framebuffer[row * row_stride];
+            if (row + 1 == h->cfg.rows) payload.flags = 0;
+
+            err = spi_device_polling_transmit(h->spi, &payload);
+            if (err != ESP_OK)
+                goto defer;
+        }
     }
 
 defer:

@@ -241,7 +241,7 @@ void init_devices() {
         .data6_io_num = -1,
         .data7_io_num = -1,
         .flags = SPICOMMON_BUSFLAG_MASTER,
-        .max_transfer_sz = 8912,
+        .max_transfer_sz = 8192,
     };
     //Initialize the SPI bus
     ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
