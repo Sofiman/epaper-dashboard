@@ -1,6 +1,5 @@
 #include "gui.h"
 
-#include <stdio.h>
 #include <esp_log.h>
 #include <assert.h>
 #include "gfxfont.h"
@@ -11,6 +10,9 @@
 #include "Icons.h"
 #define FONT_BIG DigitalDisco16pt7b
 #define FONT_SMALL Blocktopia8pt7b
+
+// For INFINITY macros
+#include <math.h>
 
 typedef enum : uint16_t {
     LAYOUT_HORIZONTAL,
@@ -89,7 +91,7 @@ static void render_text(bitui_t ctx, const GFXfont *font, const char *str, const
 }
 
 static char temp_str[80];
-#define tmp_sprintf(...) snprintf(temp_str, sizeof(temp_str), __VA_ARGS__)
+#define tmp_sprintf(...) (snprintf(temp_str, sizeof(temp_str), __VA_ARGS__), temp_str)
 
 static void gui_render_boot(bitui_t ctx, const gui_data_t *data) {
     (void)data;
@@ -160,7 +162,7 @@ static bool is_day(const struct Forecast *forecast, int64_t now, int64_t *sun_ev
 
 static void widget_weather(bitui_t ctx, const gui_data_t *data)
 {
-    const struct Forecast *forecast = &data->forecast;
+    const struct Forecast *forecast = data->forecast;
 
     enum {
         COL_WIDTH = 32,
@@ -276,8 +278,7 @@ static void widget_time(bitui_t ctx, const gui_data_t *data)
     render_text(ctx, &FONT_BIG, temp_str, SCREEN_ROWS / 2 - s.w / 2, 12 + s.h / 2);
 }
 
-#include <math.h>
-static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
+static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit, const TempData *data, bool higher_is_better)
 {
     enum {
         MARGIN = 2,
@@ -285,6 +286,7 @@ static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
         HEIGHT = 44,
         START_Y = 52,
         USABLE_HEIGHT = 32,
+        BARS_COUNT = (WIDTH - 8) / 4 + 1,
     };
 
     uint16_t start_x = i * (MARGIN + WIDTH) + 1;
@@ -293,8 +295,9 @@ static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
     draw_widget_outline(ctx, (bitui_rect_t){ .x = start_x, .y = START_Y, .w = WIDTH, .h = HEIGHT }, label);
 
     struct size s;
-    s = measure_text(&FONT_SMALL, unit);
-    render_text(ctx, &FONT_SMALL, unit, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
+    const char *current_val = data && data->count > 0 ? tmp_sprintf("%.1f %s", ringbuf_newest(data), unit) : tmp_sprintf("? %s", unit);
+    s = measure_text(&FONT_SMALL, current_val);
+    render_text(ctx, &FONT_SMALL, current_val, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
 
     const int error = 1;
     if (error < 0) {
@@ -309,20 +312,42 @@ static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit)
         return;
     }
 
-    if (error == 0) {
+    if (data == NULL || data->count == 0) {
         s = measure_text(&FONT_SMALL, "no history");
         render_text(ctx, &FONT_SMALL, "no history", start_x + WIDTH / 2 - s.w / 2, START_Y + HEIGHT / 2 - MARGIN + s.h/2);
         return;
     }
 
-    ctx->color = false;
-    for (int i = 4; i < WIDTH - 4; i += 4) {
-        float p = (1.0f + cosf(start_x + 2 * M_PI * i/100))/2.0f;
-        uint16_t bar_height = (USABLE_HEIGHT - 2) * p + 2;
-        bitui_line(ctx, start_x + i    , START_Y + HEIGHT - MARGIN, start_x + i    , START_Y + HEIGHT - MARGIN - bar_height);
-        bitui_line(ctx, start_x + i + 1, START_Y + HEIGHT - MARGIN, start_x + i + 1, START_Y + HEIGHT - MARGIN - bar_height);
+    float max = -INFINITY, min = INFINITY;
+    if (data->count == 1) {
+        max = data->items[data->start]*2;
+        min = 0;
+    } else {
+        for_ringbuf(data) {
+            float val = data->items[it];
+            if (val > max) max = val;
+            if (val < min) min = val;
+        }
     }
+    //max += 1/(max-min);
+    //min -= 1/(max-min);
 
+    ctx->color = false;
+    int dx = 4;
+    int to_skip = data->count - BARS_COUNT;
+    for_ringbuf(data) {
+        if (to_skip > 0) {
+            --to_skip;
+            continue;
+        }
+        float p = (data->items[it] - min) / (max-min);
+        //if (higher_is_better) p = 1.0 - p;
+        uint16_t bar_height = (USABLE_HEIGHT - 2) * p + 2;
+        bitui_line(ctx, start_x + dx    , START_Y + HEIGHT - MARGIN, start_x + dx    , START_Y + HEIGHT - MARGIN - bar_height);
+        bitui_line(ctx, start_x + dx + 1, START_Y + HEIGHT - MARGIN, start_x + dx + 1, START_Y + HEIGHT - MARGIN - bar_height);
+        dx += 4;
+        if (dx >= WIDTH - 4) break;
+    }
 }
 
 static void gui_render_home(bitui_t ctx, const gui_data_t *data)
@@ -333,9 +358,9 @@ static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 
     widget_weather(ctx, data);
     widget_time(ctx, data);
-    widget_temp(ctx, 0, "TEMP", "26.3 C");
-    widget_temp(ctx, 1, "RH", "29.4 %");
-    widget_temp(ctx, 2, "CO2", "1587 ppm");
+    widget_temp(ctx, 0, "TEMP", "C", data->temp_data, false);
+    widget_temp(ctx, 1, "RH", "%", data->rel_hum_data, true);
+    widget_temp(ctx, 2, "CO2", "ppm", NULL, false);
 }
 
 typedef void (*gui_screeen_renderer_t)(bitui_t ctx, const gui_data_t *data);

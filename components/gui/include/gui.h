@@ -31,15 +31,17 @@ struct Forecast {
 _Static_assert(sizeof(((struct Forecast*)NULL)->hourly.time[0]) == sizeof(time_t));
 _Static_assert(sizeof(((struct Forecast*)NULL)->daily.time[0]) == sizeof(time_t));
 
-#define RingBuf(T) struct { \
-    T* items; \
-    size_t capacity; \
-    size_t start, end; \
+#define RingBuf(T, N) struct { \
+    size_t start, count; \
+    T items[N]; \
 }
 
-typedef RingBuf(uint16_t) TempData;
-typedef RingBuf(uint16_t) RelHumData;
-typedef RingBuf(uint16_t) CO2Data;
+typedef RingBuf(float, 32) TempData;
+typedef RingBuf(float, 32) RelHumData;
+typedef RingBuf(uint16_t, 32) CO2Data;
+
+#define for_ringbuf(RingBuf) for (long __rem = (RingBuf)->count, it = (RingBuf)->start; __rem > 0; __rem--, it = (it + 1) % 32)
+#define ringbuf_newest(RingBuf) ((RingBuf)->items[((RingBuf)->start + (RingBuf)->count - 1) % 32])
 
 typedef enum {
     GUI_BOOT = 0,
@@ -56,9 +58,9 @@ typedef struct {
     esp_netif_t* netif;
 
     // Home screen
-    struct Forecast forecast;
+    const struct Forecast *forecast;
     const TempData *temp_data;
-    const RelHumData *rel_hum_data;
+    const TempData *rel_hum_data;
     const CO2Data *co2_data;
 } gui_data_t;
 

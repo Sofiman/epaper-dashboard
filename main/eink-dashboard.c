@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "driver/i2c_master.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -15,10 +16,10 @@
 #include "esp_tls.h"
 #include "esp_crt_bundle.h"
 #include "lwip/err.h"
-#include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include "lwip/netdb.h"
 #include "lwip/dns.h"
+#include "esp_sleep.h"
 
 #include "immjson.h"
 #include "sdkconfig.h"
@@ -26,6 +27,7 @@
 #include "ssd1680.h"
 #include "bitui.h"
 #include "gui.h"
+#include "sht4x.h"
 
 static const char *TAG = "main";
 
@@ -219,12 +221,11 @@ void wifi_init_sta(void)
         ESP_LOGI(TAG, "connected to ap SSID:%s", wifi_config.sta.ssid);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s", wifi_config.sta.ssid);
-    } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
 }
 
 ssd1680_handle_t ssd1680_handle;
+i2c_master_dev_handle_t sht41_dev_handle;
 
 void init_devices() {
     esp_err_t ret;
@@ -252,12 +253,12 @@ void init_devices() {
     int64_t start = esp_timer_get_time();
     ret = ssd1680_init(&(ssd1680_config_t) {
         .controller = SSD1685,
-        .rotation = SSD1680_ROT_270,
+        .rotation = SSD1680_ROT_090,
         .host = SPI2_HOST,
         .busy_pin = GPIO_NUM_0,
         .reset_pin = GPIO_NUM_1,
         .dc_pin = GPIO_NUM_5,
-        .cs_pin = GPIO_NUM_10,
+        .cs_pin = GPIO_NUM_4,
 
         .rows = SCREEN_ROWS,
         .cols = SCREEN_COLS,
@@ -266,7 +267,25 @@ void init_devices() {
     int64_t end = esp_timer_get_time();
     ESP_LOGD(TAG, "ssd1680_init took %lldus\n", end-start);
     ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "Initializing I2C...");
+    i2c_master_bus_config_t i2c_bus_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = -1,
+        .scl_io_num = 18,
+        .sda_io_num = 19,
+        .glitch_ignore_cnt = 7,
+    };
+    i2c_master_bus_handle_t bus_handle;
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, &bus_handle));
+
+    i2c_device_config_t i2c_dev_conf = sht4x_i2c_config(SHT4x_I2C_FAST_MODE);
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &i2c_dev_conf, &sht41_dev_handle));
 }
+
+static RTC_DATA_ATTR struct Forecast g_forecast;
+static RTC_DATA_ATTR TempData g_temp_data;
+static RTC_DATA_ATTR TempData g_rel_hum_data;
 
 static gui_data_t gui_data;
 static bitui_ctx_t bitui_handle;
@@ -348,19 +367,17 @@ static void decode_weather(esp_tls_t *tls_session) {
     src.remainder.head = memmem(src.remainder.head, src.remainder.tail - src.remainder.head, HTTP_HEAD_END, sizeof(HTTP_HEAD_END) - 1);
     if (src.remainder.head != NULL) {
         src.remainder.head += sizeof(HTTP_HEAD_END) - 1;
-        struct Forecast *out = &gui_data.forecast;
+        struct Forecast *out = &g_forecast;
 
-        int64_t start = esp_timer_get_time();
         int res = json_deserialize_object(&src, (void**)&out, forecast_schema);
-        int64_t end = esp_timer_get_time();
-        ESP_LOGD(TAG, "json_deserialize_object took %lldus", end-start);
 
         if (!res) {
             ESP_LOGE(TAG, "Failed to deserialize forecast\n");
             ESP_LOGE(TAG, " %zu:%zu  | %.*s\n", src.line, json_source_column(&src), (int)(src.remainder.tail - src.remainder.head), src.remainder.head);
         } else {
-            ESP_LOGI(TAG, "Got lat=%f, lon=%f", gui_data.forecast.latitude, gui_data.forecast.longitude);
+            ESP_LOGI(TAG, "Got lat=%f, lon=%f", gui_data.forecast->latitude, gui_data.forecast->longitude);
 
+            /*
             ESP_LOGD(TAG, "forecast.hourly=[");
             for (int i = 0; i < FORECAST_HOURLY_POINT_COUNT; i++) {
                 ESP_LOGD(TAG, "\ttime[%d] = %lld\ttemperature_2m[%d] = %.1f\tweather_code[%d] = %hhu,", i, gui_data.forecast.hourly.time[i], i, gui_data.forecast.hourly.temperature_2m[i], i, gui_data.forecast.hourly.weather_code[i]);
@@ -371,8 +388,9 @@ static void decode_weather(esp_tls_t *tls_session) {
             for (int i = 0; i < FORECAST_DURATION_DAYS; i++) {
                 ESP_LOGD(TAG, "\ttime[%d] = %lld\tsunrise[%d] = %lld\tsunset[%d] = %lld,", i, gui_data.forecast.daily.time[i], i, gui_data.forecast.daily.sunrise[i], i, gui_data.forecast.daily.sunset[i]);
             }
-            ESP_LOGD(TAG, "]");
-            time(&gui_data.forecast.updated_at);
+            ESP_LOGD(TAG, "]");*/
+            g_forecast.updated_at = 1;
+            //time(&g_forecast.updated_at);
         }
     } else {
         ESP_LOGE(TAG, "Failed to deserialize forecast: `%.*s`\n", (int)(remainder.tail - remainder.head), remainder.head);
@@ -458,16 +476,27 @@ void vTask_gui_tick(void * pvParameters)
     }
 }
 
-static TaskHandle_t xTask_gui_tick = NULL;
+static float *ringbuf_emplace(TempData *buf) {
+    if (buf->count < 32) return &buf->items[buf->count++];
+    size_t new_item = buf->start;
+    buf->start = (buf->start + 1) % 32;
+    return &buf->items[new_item];
+}
 
-void app_main(void)
-{
-    esp_err_t ret;
+static void load_sensors_data(void) {
+    sht4x_result_t res = sht4x_cmd(sht41_dev_handle, SHT4x_MEASURE_HIGH_PRECISION);
+    ESP_ERROR_CHECK(res.err);
 
-    init_devices();
+    sht4x_sample_t sample = sht4x_convert(res.measurement);
 
-    setenv("TZ", TZ_EUROPE_PARIS, 1);
-    tzset();
+    ESP_LOGI(TAG, "Temp : %.1f°C ±0.2 \t\tHumidity : %.1f%% ±2 ", sample.temperature_celcius, sample.relative_humidity);
+
+    *ringbuf_emplace(&g_temp_data) = sample.temperature_celcius;
+    *ringbuf_emplace(&g_rel_hum_data) = sample.relative_humidity;
+}
+
+static void load_weather_data(void) {
+    static TaskHandle_t xTask_gui_tick = NULL;
 
     xTaskCreate(vTask_gui_tick, "gui_tick", 4096, NULL, 5, &xTask_gui_tick);
 
@@ -477,11 +506,11 @@ void app_main(void)
     esp_netif_sntp_start();
     ESP_ERROR_CHECK(esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000))); // 10s
 
+    g_forecast.updated_at = 0;
     gui_data.tick = 0;
-    gui_data.forecast.updated_at = 0;
     gui_data.current_screen = GUI_HOME;
 
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     https_get_request(WEATHER_WEB_URL, WEATHER_REQUEST, decode_weather);
 
@@ -497,13 +526,47 @@ void app_main(void)
         vTaskDelete(xTask_gui_tick);
         xTask_gui_tick = NULL;
     }
+}
+
+void app_main(void)
+{
+    esp_err_t ret;
+    gui_data.forecast = &g_forecast;
+    gui_data.temp_data = &g_temp_data;
+    gui_data.rel_hum_data = &g_rel_hum_data;
+
+    init_devices();
+
+    setenv("TZ", TZ_EUROPE_PARIS, 1);
+    tzset();
+
+    switch (esp_sleep_get_wakeup_cause()) {
+    case ESP_SLEEP_WAKEUP_TIMER: {
+            bitui_handle = (bitui_ctx_t){
+                .width = SCREEN_ROWS,
+                .height = SCREEN_COLS,
+                .stride = SCREEN_STRIDE,
+                .framebuffer = framebuffer,
+                .color = true,
+            };
+            load_sensors_data();
+            gui_data.tick = 0;
+            gui_data.current_screen = GUI_HOME;
+            gui_tick(&bitui_handle);
+        } break;
+    case ESP_SLEEP_WAKEUP_UNDEFINED:
+    default:
+        load_sensors_data();
+        load_weather_data();
+        break;
+    }
+
     ret = ssd1680_wait_until_idle(ssd1680_handle);
     ESP_ERROR_CHECK(ret);
     ret = ssd1680_deinit(&ssd1680_handle);
     ESP_ERROR_CHECK(ret);
 
-    while (1) {
-        //esp_task_wdt_reset();
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
+    esp_sleep_enable_timer_wakeup(10 /* min */ * 60 /* s */ * 1000 * /* ms */ 1000 /* us */);
+
+    esp_deep_sleep_start();
 }
