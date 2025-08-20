@@ -54,7 +54,7 @@ static inline void bitui_colorize(bitui_t ctx, uint16_t offset, uint8_t updated_
     p = bitui_apply_rot((Ctx), p); \
     *(X) = p.x; \
     *(Y) = p.y; \
-} while (0);
+} while (0)
 
 bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
     _Static_assert(BITUI_ROT_270 == (BITUI_ROT_090 | BITUI_ROT_180), "Rotation bitwise composition");

@@ -78,7 +78,12 @@ void render_copy(SDL_Texture *texture, bool reload) {
         uint8_t* pixels = texture_pixels;
         for (int y = 0; y < WIN_HEIGHT; y++) {
             for (int x = 0; x < WIN_WIDTH; x++) {
+#ifdef BITUI_ROTATION
                 p = bitui_apply_rot(ctx, (bitui_point_t){.x = x, .y = y});
+#else
+                p.x = x;
+                p.y = y;
+#endif
                 pixels[y * texture_pitch + x] = (ctx->framebuffer[p.y * SCREEN_STRIDE + p.x / 8]) & (0x80 >> (p.x & 7)) ? 0xff : 0;
             }
         }
@@ -140,7 +145,9 @@ int main(int argc, char **argv) {
         .height = SCREEN_ROWS,
         .stride = SCREEN_STRIDE,
         .framebuffer = framebuffer,
+#ifdef BITUI_ROTATION
         .rot = BITUI_ROT_090,
+#endif
         .color = true,
     };
 

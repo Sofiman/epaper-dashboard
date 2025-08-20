@@ -12,6 +12,16 @@ typedef struct {
     uint16_t w, h;
 } bitui_rect_t;
 
+#ifdef BITUI_ROTATION
+typedef enum {
+    BITUI_ROT_000 = 0x00,
+    BITUI_ROT_090 = 0x01,
+    BITUI_ROT_180 = 0x02,
+    BITUI_ROT_270 = 0x03,
+} bitui_rot;
+#define BITUI_ROT_INVERT(Rot) ((Rot) ^ BITUI_ROT_270)
+#endif
+
 typedef struct {
     uint16_t width, height, stride;
     uint8_t *framebuffer;
@@ -28,14 +38,6 @@ typedef bitui_ctx_t *bitui_t;
 void bitui_clear(bitui_t ctx, bool color);
 
 #ifdef BITUI_ROTATION
-typedef enum {
-    BITUI_ROT_000 = 0x00,
-    BITUI_ROT_090 = 0x01,
-    BITUI_ROT_180 = 0x02,
-    BITUI_ROT_270 = 0x03,
-} bitui_rot;
-#define BITUI_ROT_INVERT(Rot) ((Rot) ^ BITUI_ROT_270)
-
 bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point);
 #endif
 
