@@ -2,8 +2,6 @@
 #include <assert.h>
 #include <string.h>
 
-#define SWAP_XY // Correct pixel format for SSD1680
-
 #define SWAP_U16(A,B) do { \
     uint16_t __tmp = (A); \
     (A) = (B); \
@@ -12,7 +10,7 @@
 
 void bitui_clear(bitui_t ctx, bool color) {
     size_t count;
-#ifndef SWAP_XY
+#ifndef BITUI_SWAP_XY
     count = ctx->stride * ctx->height;
 #else
     count = ctx->stride * ctx->width;
@@ -75,7 +73,7 @@ bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
 #define bitui_rotate(Ctx, X, Y)
 #endif
 
-#ifndef SWAP_XY
+#ifndef BITUI_SWAP_XY
 #define ROW_AT(X, Y) (Y)
 #define STRIDE(Ctx) (ctx->stride)
 #define COL_AT(X, Y) ((X)/8)
@@ -97,7 +95,7 @@ void bitui_point(bitui_t ctx, uint16_t x, uint16_t y) {
     bitui_colorize(ctx, IDX_AT(ctx, x, y), BIT_AT(x, y));
 }
 
-#ifndef SWAP_XY
+#ifndef BITUI_SWAP_XY
 void bitui_hline(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
     if (x1 > x2) SWAP_U16(x1, x2);
 
