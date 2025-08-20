@@ -135,10 +135,9 @@ static char *alloc_str_fn(void *user_data, char *oldptr, size_t old_size, size_t
     return realloc(oldptr, new_size);
 }
 
-static bool noRetry = false;
-static esp_netif_t* netif;
 static int s_retry_num = 0;
 #define MAXIMUM_RETRY 3
+#define NO_RETRY -1
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
@@ -148,7 +147,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGI(TAG, "Disconnected");
-        if (noRetry) return;
+        if (s_retry_num == NO_RETRY) return;
         if (s_retry_num < MAXIMUM_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
@@ -171,7 +170,7 @@ void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_netif_init());
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    netif = esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_sta();
 
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     esp_netif_sntp_init(&config);
@@ -340,7 +339,6 @@ static void https_get_request(const char *WEB_SERVER_URL, const char *REQUEST, v
                                  REQUEST + written_bytes,
                                  request_len - written_bytes);
         if (ret >= 0) {
-            ESP_LOGI(TAG, "%d bytes written", ret);
             written_bytes += ret;
         } else if (ret != ESP_TLS_ERR_SSL_WANT_READ  && ret != ESP_TLS_ERR_SSL_WANT_WRITE) {
             ESP_LOGE(TAG, "esp_tls_conn_write  returned: [0x%02X](%s)", ret, esp_err_to_name(ret));
@@ -516,7 +514,7 @@ static void load_weather_data(void) {
 
     vTaskDelay(100 / portTICK_PERIOD_MS);
 
-    noRetry = true;
+    s_retry_num = NO_RETRY;
     ESP_ERROR_CHECK(esp_wifi_stop());
 
     esp_netif_sntp_deinit();
