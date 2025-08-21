@@ -84,7 +84,6 @@ static void render_text(bitui_t ctx, const GFXfont *font, const char *str, const
 
         assert(c >= font->first || c <= font->last);
         const GFXglyph glyph = font->glyph[c - font->first];
-
         bitui_paste_bitstream(ctx, font->bitmap + glyph.bitmapOffset, glyph.width, glyph.height, glyph.xOffset + x, y + glyph.yOffset);
         x += glyph.xAdvance;
     }
@@ -94,16 +93,22 @@ static char temp_str[80];
 #define tmp_sprintf(...) (snprintf(temp_str, sizeof(temp_str), __VA_ARGS__), temp_str)
 
 static void gui_render_boot(bitui_t ctx, const gui_data_t *data) {
-    (void)data;
     bitui_clear(ctx, true);
-    render_text(ctx, &FONT_BIG, "Connecting to Wi-Fi", 32, 48);
+
+    const char *title = "Connecting to Wi-Fi";
+    struct size s = measure_text(&FONT_BIG, title);
+    uint16_t start_y = ctx->height / 2 - (s.h + 17 + 17) / 2 + s.h;
+    render_text(ctx, &FONT_BIG, title, ctx->width / 2 - s.w / 2, start_y);
+
+    const GFXglyph glyph = Icons.glyph[ICON_HOURGLASS_FILLED_20 + data->tick % 5];
+    bitui_paste_bitstream(ctx, Icons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, ctx->width / 2 - (glyph.xOffset + glyph.width) / 2, start_y + 17);
 }
 
 static void gui_render_wifi_init(bitui_t ctx, const gui_data_t *data) {
     bitui_clear(ctx, true);
 
     esp_netif_ip_info_t ip_info;
-    esp_netif_get_ip_info(data->netif, &ip_info);
+    esp_netif_get_ip_info(esp_netif_get_default_netif(), &ip_info);
 
     tmp_sprintf("Connected\nIP: " IPSTR "\nSyncing time...", IP2STR(&ip_info.ip));
     render_text(ctx, &FONT_BIG, temp_str, 32, 48);
