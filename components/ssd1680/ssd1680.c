@@ -372,7 +372,7 @@ esp_err_t ssd1680_deinit(ssd1680_handle_t *ctx) {
      *    • Deep sleep by Command 0x10
      */
     {
-        const uint8_t deep_sleep_mode = DEEP_SLEEP_MODE_1;
+        const uint8_t deep_sleep_mode = DEEP_SLEEP_MODE_2;
         err = ssd1680_cmd_write(*ctx, CMD_DeepSleepMode, deep_sleep_mode);
     }
 
