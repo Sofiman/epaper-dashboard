@@ -13,6 +13,8 @@ typedef struct {
     esp_ip4_addr_t ip;      /**< Interface IPV4 address */
 } esp_netif_ip_info_t;
 
+#define esp_netif_get_default_netif() ((esp_netif_t *)NULL)
+
 static void esp_netif_get_ip_info(esp_netif_t *esp_netif, esp_netif_ip_info_t *ip_info)
 {
     (void) esp_netif;

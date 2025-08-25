@@ -58,49 +58,49 @@ static struct Forecast g_forecast = {
         },
         .updated_at = 1
     };
-static TempData temp_data = {
-    .start = 5,
+static ulp_sample_ringbuf_t g_ulp_samples = {
+    .start = 0,
     .count = 32,
     .items = {
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        15,
-        16,
-        17,
-        18,
-        19,
-        20,
-        21,
-        22,
-        23,
-        24,
-        25,
-        26,
-        27,
-        28,
-        29,
-        30,
-        31,
-        32,
+        { .sht4x_raw_sample.raw_temperature = 100, },
+        { .sht4x_raw_sample.raw_temperature = 200, },
+        { .sht4x_raw_sample.raw_temperature = 300, },
+        { .sht4x_raw_sample.raw_temperature = 400, },
+        { .sht4x_raw_sample.raw_temperature = 500, },
+        { .sht4x_raw_sample.raw_temperature = 600, },
+        { .sht4x_raw_sample.raw_temperature = 700, },
+        { .sht4x_raw_sample.raw_temperature = 800, },
+        { .sht4x_raw_sample.raw_temperature = 900, },
+        { .sht4x_raw_sample.raw_temperature = 1000, },
+        { .sht4x_raw_sample.raw_temperature = 1100, },
+        { .sht4x_raw_sample.raw_temperature = 1200, },
+        { .sht4x_raw_sample.raw_temperature = 1300, },
+        { .sht4x_raw_sample.raw_temperature = 1400, },
+        { .sht4x_raw_sample.raw_temperature = 1500, },
+        { .sht4x_raw_sample.raw_temperature = 1600, },
+        { .sht4x_raw_sample.raw_temperature = 1700, },
+        { .sht4x_raw_sample.raw_temperature = 1800, },
+        { .sht4x_raw_sample.raw_temperature = 1900, },
+        { .sht4x_raw_sample.raw_temperature = 2000, },
+        { .sht4x_raw_sample.raw_temperature = 2100, },
+        { .sht4x_raw_sample.raw_temperature = 2200, },
+        { .sht4x_raw_sample.raw_temperature = 2300, },
+        { .sht4x_raw_sample.raw_temperature = 2400, },
+        { .sht4x_raw_sample.raw_temperature = 2500, },
+        { .sht4x_raw_sample.raw_temperature = 2600, },
+        { .sht4x_raw_sample.raw_temperature = 2700, },
+        { .sht4x_raw_sample.raw_temperature = 2800, },
+        { .sht4x_raw_sample.raw_temperature = 2900, },
+        { .sht4x_raw_sample.raw_temperature = 3000, },
+        { .sht4x_raw_sample.raw_temperature = 3100, },
+        { .sht4x_raw_sample.raw_temperature = 3200, },
     },
 };
 
 static gui_data_t gui_data = {
     .current_screen = GUI_HOME,
     .forecast = &g_forecast,
-    .temp_data = &temp_data
+    .samples = &g_ulp_samples
 };
 
 void render_copy(SDL_Texture *texture, bool reload) {
@@ -130,13 +130,6 @@ void render_copy(SDL_Texture *texture, bool reload) {
         }
     }
     SDL_UnlockTexture(texture);
-}
-
-static float *ringbuf_emplace(TempData *buf) {
-    if (buf->count < 32) return &buf->items[buf->count++];
-    size_t new_item = buf->start;
-    buf->start = (buf->start + 1) % 32;
-    return &buf->items[new_item];
 }
 
 int main(int argc, char **argv) {
@@ -220,11 +213,15 @@ int main(int argc, char **argv) {
                 } else if (e.key.keysym.scancode == SDL_SCANCODE_R) {
                     gui_data.tick = 0;
                     g_forecast.updated_at = 0;
-                    temp_data.count = 0;
+                    g_ulp_samples.count = 0;
                     render_copy(texture, false);
                 } else if (e.key.keysym.scancode == SDL_SCANCODE_T) {
-                    const float new = ringbuf_newest(&temp_data) + 1.0 - ((float)rand() / (float)RAND_MAX) * 2.0;
-                    *ringbuf_emplace(&temp_data) = new;
+                    const ulp_sample_t newest = g_ulp_samples.items[ringbuf_newest(&g_ulp_samples)];
+                    const uint16_t delta = 2.0 - ((float)rand() / (float)RAND_MAX) * 4.0;
+
+                    *ringbuf_emplace(&g_ulp_samples) = (ulp_sample_t) {
+                        .sht4x_raw_sample.raw_temperature = newest.sht4x_raw_sample.raw_temperature + delta,
+                    };
                     render_copy(texture, false);
                 }
             }

@@ -1,7 +1,9 @@
 #include "gui.h"
 
-#include <esp_log.h>
 #include <assert.h>
+#include <float.h>
+#include <stdio.h>
+
 #include "gfxfont.h"
 #define PROGMEM
 #include "Meteocons.h"
@@ -10,9 +12,6 @@
 #include "Icons.h"
 #define FONT_BIG DigitalDisco16pt7b
 #define FONT_SMALL Blocktopia8pt7b
-
-// For INFINITY macros
-#include <math.h>
 
 typedef enum : uint16_t {
     LAYOUT_HORIZONTAL,
@@ -38,8 +37,6 @@ bitui_point_t bitlayout_element(bitlayout_t *l, bitui_point_t size) {
     l->element_count++;
     return element_pos;
 }
-
-static const char *TAG = "GUI";
 
 struct size {
     uint16_t w, h;
@@ -105,6 +102,7 @@ static void gui_render_boot(bitui_t ctx, const gui_data_t *data) {
 }
 
 static void gui_render_wifi_init(bitui_t ctx, const gui_data_t *data) {
+    (void)data;
     bitui_clear(ctx, true);
 
     esp_netif_ip_info_t ip_info;
@@ -272,6 +270,7 @@ static void widget_weather(bitui_t ctx, const gui_data_t *data)
 
 static void widget_time(bitui_t ctx, const gui_data_t *data)
 {
+    (void)data;
     time_t now = 0;
     struct tm timeinfo = { 0 };
     time(&now);
@@ -283,7 +282,33 @@ static void widget_time(bitui_t ctx, const gui_data_t *data)
     render_text(ctx, &FONT_BIG, temp_str, SCREEN_ROWS / 2 - s.w / 2, 12 + s.h / 2);
 }
 
-static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit, const TempData *data, bool higher_is_better)
+enum WidgetGraphKind {
+    WIDGET_TEMP_SHOW_TEMP = 0,
+    WIDGET_TEMP_SHOW_HUM,
+    WIDGET_TEMP_SHOW_CO2,
+};
+
+struct WidgetGraphMetadata {
+    const char label[5];
+    const char unit[4];
+};
+
+static struct WidgetGraphMetadata WIDGET_GRAPH_METADATA_BY_KIND[] = {
+    [WIDGET_TEMP_SHOW_TEMP] = { .label = "TEMP", .unit = "C" },
+    [WIDGET_TEMP_SHOW_HUM]  = { .label = "RH",   .unit = "%" },
+    [WIDGET_TEMP_SHOW_CO2]  = { .label = "CO2",  .unit = "ppm" },
+};
+
+static inline float extract_from_ulp_sample(const ulp_sample_t *sample, enum WidgetGraphKind kind) {
+    switch (kind) {
+    case WIDGET_TEMP_SHOW_TEMP: return sht4x_convert(sample->sht4x_raw_sample).temperature_celcius; break;
+    case WIDGET_TEMP_SHOW_HUM:  return sht4x_convert(sample->sht4x_raw_sample).relative_humidity; break;
+    case WIDGET_TEMP_SHOW_CO2:  return sample->co2_ppm; break;
+    }
+    return 0.0f;
+}
+
+static void widget_graph(bitui_t ctx, int screen_idx, const ulp_sample_ringbuf_t *data, enum WidgetGraphKind kind)
 {
     enum {
         MARGIN = 2,
@@ -294,64 +319,79 @@ static void widget_temp(bitui_t ctx, int i, const char *label, const char *unit,
         BARS_COUNT = (WIDTH - 8) / 4 + 1,
     };
 
-    uint16_t start_x = i * (MARGIN + WIDTH) + 1;
+    struct size s;
+    struct WidgetGraphMetadata metadata = WIDGET_GRAPH_METADATA_BY_KIND[kind];
+    uint16_t start_x = screen_idx * (MARGIN + WIDTH) + 1;
 
     ctx->color = true;
-    draw_widget_outline(ctx, (bitui_rect_t){ .x = start_x, .y = START_Y, .w = WIDTH, .h = HEIGHT }, label);
-
-    struct size s;
-    const char *current_val = data && data->count > 0 ? tmp_sprintf("%.1f %s", ringbuf_newest(data), unit) : tmp_sprintf("? %s", unit);
-    s = measure_text(&FONT_SMALL, current_val);
-    render_text(ctx, &FONT_SMALL, current_val, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
-
-    const int error = 1;
-    if (error < 0) {
-        tmp_sprintf("E%x", -error);
-
-        s = measure_text(&FONT_SMALL, temp_str);
-        uint16_t start_y = START_Y + HEIGHT / 2 + MARGIN - (17 + MARGIN + s.h/2) / 2;
-        render_text(ctx, &FONT_SMALL, temp_str, start_x + WIDTH / 2 - s.w/2, start_y + 17 + MARGIN + s.h/2);
-
-        const GFXglyph glyph = Icons.glyph[ICON_WARNING];
-        bitui_paste_bitstream(ctx, Icons.bitmap + glyph.bitmapOffset, glyph.width, glyph.height, start_x + WIDTH/2 - 17/2, start_y);
-        return;
-    }
+    draw_widget_outline(ctx, (bitui_rect_t){ .x = start_x, .y = START_Y, .w = WIDTH, .h = HEIGHT }, metadata.label);
 
     if (data == NULL || data->count == 0) {
+        const char *value = tmp_sprintf("? %s", metadata.unit);
+        s = measure_text(&FONT_SMALL, value);
+        render_text(ctx, &FONT_SMALL, value, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
+
         s = measure_text(&FONT_SMALL, "no history");
         render_text(ctx, &FONT_SMALL, "no history", start_x + WIDTH / 2 - s.w / 2, START_Y + HEIGHT / 2 - MARGIN + s.h/2);
         return;
     }
 
-    float max = -INFINITY, min = INFINITY;
-    if (data->count == 1) {
-        max = data->items[data->start]*2;
-        min = 0;
-    } else {
-        for_ringbuf(data) {
-            float val = data->items[it];
-            if (val > max) max = val;
-            if (val < min) min = val;
+    const ulp_sample_t *newest = &data->items[ringbuf_newest(data)];
+    const float cur_val = extract_from_ulp_sample(newest, kind);
+
+    const char *current_val = tmp_sprintf("%.1f %s", cur_val, metadata.unit);
+    s = measure_text(&FONT_SMALL, current_val);
+    render_text(ctx, &FONT_SMALL, current_val, start_x + WIDTH - MARGIN - s.w, START_Y - MARGIN + s.h/2);
+
+    float max_val, min_val;
+    max_val = min_val = cur_val;
+    {
+        // Calculate the min/max values for the last 10 samples
+        enum {
+            MIN_MAX_WINDOW_SIZE = 15,
+        };
+        _Static_assert(MIN_MAX_WINDOW_SIZE <= ringbuf_cap(data));
+
+        const int split_idx = data->count >= MIN_MAX_WINDOW_SIZE ? ringbuf_newest_nth(data, MIN_MAX_WINDOW_SIZE - 1) : 0;
+        for (int i = 0, it = split_idx; i < MIN_MAX_WINDOW_SIZE; i++, it = ringbuf_next(data, it)) {
+            float val = extract_from_ulp_sample(&data->items[it], kind);
+            if (val > max_val) max_val = val;
+            if (val < min_val) min_val = val;
         }
+
+        float max_rem, min_rem;
+        max_rem = min_rem = extract_from_ulp_sample(&data->items[data->start], kind);
+        // Calculate separate min/max for the remaining samples
+        for (int i = ringbuf_next(data, data->start); i != split_idx; i = ringbuf_next(data, i)) {
+            float val = extract_from_ulp_sample(&data->items[i], kind);
+            if (val > max_rem) max_rem = val;
+            if (val < min_rem) min_rem = val;
+        }
+
+        if (max_rem > max_val) max_val += (max_rem - max_val) * 0.25f;
+        if (min_rem < min_val) min_val += (min_rem - min_val) * 0.25f;
     }
-    //max += 1/(max-min);
-    //min -= 1/(max-min);
+
+    // Prevent division by zero at the normalization step
+    if ((max_val - min_val) < FLT_EPSILON) {
+        max_val = cur_val*2;
+        min_val = 0;
+    }
 
     ctx->color = false;
-    int dx = 4;
-    int to_skip = data->count - BARS_COUNT;
-    for_ringbuf(data) {
-        if (to_skip > 0) {
-            --to_skip;
-            continue;
-        }
-        float p = (data->items[it] - min) / (max-min);
-        //if (higher_is_better) p = 1.0 - p;
+
+    _Static_assert(BARS_COUNT <= ringbuf_cap(data), "Graph must have less (or equal) bars than ringbuf values");
+    int it = data->count >= BARS_COUNT ? ringbuf_newest_nth(data, BARS_COUNT-1) : 0;
+    for (int i = 0; i < BARS_COUNT; i++, it = ringbuf_next(data, it)) {
+        float val = extract_from_ulp_sample(&data->items[it], kind);
+        float p = (val - min_val) / (max_val-min_val);
+        if (p < 0) p = 0;
+        if (p > 1) p = 1;
+
+        uint16_t dx = (i + 1) * 4;
         uint16_t bar_height = (USABLE_HEIGHT - 2) * p + 2;
         bitui_line(ctx, start_x + dx    , START_Y + HEIGHT - MARGIN, start_x + dx    , START_Y + HEIGHT - MARGIN - bar_height);
         bitui_line(ctx, start_x + dx + 1, START_Y + HEIGHT - MARGIN, start_x + dx + 1, START_Y + HEIGHT - MARGIN - bar_height);
-        dx += 4;
-        if (dx >= WIDTH - 4) break;
     }
 }
 
@@ -363,9 +403,10 @@ static void gui_render_home(bitui_t ctx, const gui_data_t *data)
 
     widget_weather(ctx, data);
     widget_time(ctx, data);
-    widget_temp(ctx, 0, "TEMP", "C", data->temp_data, false);
-    widget_temp(ctx, 1, "RH", "%", data->rel_hum_data, true);
-    widget_temp(ctx, 2, "CO2", "ppm", NULL, false);
+
+    widget_graph(ctx, 0, data->samples, WIDGET_TEMP_SHOW_TEMP);
+    widget_graph(ctx, 1, data->samples, WIDGET_TEMP_SHOW_HUM);
+    widget_graph(ctx, 2, data->samples, WIDGET_TEMP_SHOW_CO2);
 }
 
 typedef void (*gui_screeen_renderer_t)(bitui_t ctx, const gui_data_t *data);

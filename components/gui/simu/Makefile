@@ -1,5 +1,5 @@
 CFLAGS=-Wall -Wextra -g3 -fsanitize=address -fsanitize=undefined $(shell pkg-config --cflags sdl2) -O0 -fPIC -DBITUI_ROTATION
-CPPFLAGS=-I../include -I../../bitui/include -I.
+CPPFLAGS=-I../include -I../../bitui/include -I../../sht4x/include -I.
 LDFLAGS=$(shell pkg-config --libs sdl2) -fsanitize=address -fsanitize=undefined -lm
 
 all: main libgui.so

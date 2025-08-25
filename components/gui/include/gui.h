@@ -1,6 +1,8 @@
 #pragma once
 
 #include "bitui.h"
+#include "sht4x.h"
+#include "../../../main/ulp/ringbuf.h"
 
 #include <time.h>
 #include <esp_netif.h>
@@ -31,17 +33,13 @@ struct Forecast {
 _Static_assert(sizeof(((struct Forecast*)NULL)->hourly.time[0]) == sizeof(time_t));
 _Static_assert(sizeof(((struct Forecast*)NULL)->daily.time[0]) == sizeof(time_t));
 
-#define RingBuf(T, N) struct { \
-    size_t start, count; \
-    T items[N]; \
-}
-
-typedef RingBuf(float, 32) TempData;
-typedef RingBuf(float, 32) RelHumData;
-typedef RingBuf(uint16_t, 32) CO2Data;
-
-#define for_ringbuf(RingBuf) for (long __rem = (RingBuf)->count, it = (RingBuf)->start; __rem > 0; __rem--, it = (it + 1) % 32)
-#define ringbuf_newest(RingBuf) ((RingBuf)->items[((RingBuf)->start + (RingBuf)->count - 1) % 32])
+typedef struct [[gnu::packed]] {
+    uint64_t ext_timestamp;
+    sht4x_raw_sample_t sht4x_raw_sample;
+    uint16_t co2_ppm;
+} ulp_sample_t;
+_Static_assert(sizeof(ulp_sample_t) == 14);
+typedef RingBufStatic(ulp_sample_t, 32) ulp_sample_ringbuf_t;
 
 typedef enum {
     GUI_BOOT = 0,
@@ -54,14 +52,9 @@ typedef struct {
     gui_screen_t current_screen;
     uint32_t tick;
 
-    // Boot screen
-    esp_netif_t* netif;
-
     // Home screen
     const struct Forecast *forecast;
-    const TempData *temp_data;
-    const TempData *rel_hum_data;
-    const CO2Data *co2_data;
+    const ulp_sample_ringbuf_t *samples;
 } gui_data_t;
 
 void gui_render(bitui_t ctx, const gui_data_t *data);
