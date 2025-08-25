@@ -2,7 +2,7 @@
 
 #include "bitui.h"
 #include "sht4x.h"
-#include "../../../main/ulp/ringbuf.h"
+#include "../../../main/ulp/common.h"
 
 #include <time.h>
 #include <esp_netif.h>
@@ -32,14 +32,6 @@ struct Forecast {
 };
 _Static_assert(sizeof(((struct Forecast*)NULL)->hourly.time[0]) == sizeof(time_t));
 _Static_assert(sizeof(((struct Forecast*)NULL)->daily.time[0]) == sizeof(time_t));
-
-typedef struct [[gnu::packed]] {
-    uint64_t ext_timestamp;
-    sht4x_raw_sample_t sht4x_raw_sample;
-    uint16_t co2_ppm;
-} ulp_sample_t;
-_Static_assert(sizeof(ulp_sample_t) == 14);
-typedef RingBufStatic(ulp_sample_t, 32) ulp_sample_ringbuf_t;
 
 typedef enum {
     GUI_BOOT = 0,
