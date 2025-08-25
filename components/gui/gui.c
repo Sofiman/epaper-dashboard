@@ -301,9 +301,9 @@ static struct WidgetGraphMetadata WIDGET_GRAPH_METADATA_BY_KIND[] = {
 
 static inline float extract_from_ulp_sample(const ulp_sample_t *sample, enum WidgetGraphKind kind) {
     switch (kind) {
-    case WIDGET_TEMP_SHOW_TEMP: return sht4x_convert(sample->sht4x_raw_sample).temperature_celcius; break;
-    case WIDGET_TEMP_SHOW_HUM:  return sht4x_convert(sample->sht4x_raw_sample).relative_humidity; break;
-    case WIDGET_TEMP_SHOW_CO2:  return sample->co2_ppm; break;
+    case WIDGET_TEMP_SHOW_TEMP: return sht4x_convert(sample->sht4x_raw_sample).temperature_celcius;
+    case WIDGET_TEMP_SHOW_HUM:  return sht4x_convert(sample->sht4x_raw_sample).relative_humidity;
+    case WIDGET_TEMP_SHOW_CO2:  return sample->co2_ppm;
     }
     return 0.0f;
 }
@@ -382,7 +382,15 @@ static void widget_graph(bitui_t ctx, int screen_idx, const ulp_sample_ringbuf_t
 
     _Static_assert(BARS_COUNT <= ringbuf_cap(data), "Graph must have less (or equal) bars than ringbuf values");
     int it = data->count >= BARS_COUNT ? ringbuf_newest_nth(data, BARS_COUNT-1) : 0;
-    for (int i = 0; i < BARS_COUNT; i++, it = ringbuf_next(data, it)) {
+    int count = data->count >= BARS_COUNT ? BARS_COUNT : data->count;
+    for (int i = 0; i < count; i++, it = ringbuf_next(data, it)) {
+        if (ulp_sample_flags_sht4x(data->items[it].flags) != 0) {
+            uint16_t dx = (i + 1) * 4;
+            bitui_line(ctx, start_x + dx    , START_Y + HEIGHT - MARGIN - 14, start_x + dx    , START_Y + HEIGHT - MARGIN - 16);
+            bitui_line(ctx, start_x + dx + 1, START_Y + HEIGHT - MARGIN - 14, start_x + dx + 1, START_Y + HEIGHT - MARGIN - 16);
+            continue;
+        }
+
         float val = extract_from_ulp_sample(&data->items[it], kind);
         float p = (val - min_val) / (max_val-min_val);
         if (p < 0) p = 0;
