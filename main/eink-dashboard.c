@@ -21,6 +21,10 @@
 #include "lwip/dns.h"
 #include "esp_sleep.h"
 
+#include "ulp_lp_core.h"
+#include "lp_core_i2c.h"
+#include "ulp_eink_dashboard.h"
+
 #include "immjson.h"
 #include "sdkconfig.h"
 #include "esp_log.h"
@@ -224,16 +228,16 @@ void wifi_init_sta(void)
 }
 
 ssd1680_handle_t ssd1680_handle;
-i2c_master_dev_handle_t sht41_dev_handle;
+//i2c_master_dev_handle_t sht41_dev_handle;
 
 void init_devices() {
     esp_err_t ret;
 
     ESP_LOGI(TAG, "Initializing SPI...");
     spi_bus_config_t buscfg = {
-        .mosi_io_num = GPIO_NUM_7,
+        .mosi_io_num = GPIO_NUM_3,
         .miso_io_num = -1,
-        .sclk_io_num = GPIO_NUM_6,
+        .sclk_io_num = GPIO_NUM_2,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .data4_io_num = -1,
@@ -254,9 +258,9 @@ void init_devices() {
         .controller = SSD1685,
         .rotation = SSD1680_ROT_090,
         .host = SPI2_HOST,
-        .busy_pin = GPIO_NUM_0,
-        .reset_pin = GPIO_NUM_1,
-        .dc_pin = GPIO_NUM_5,
+        .busy_pin = GPIO_NUM_19,
+        .reset_pin = GPIO_NUM_14,
+        .dc_pin = GPIO_NUM_18,
         .cs_pin = GPIO_NUM_4,
 
         .rows = SCREEN_ROWS,
@@ -267,12 +271,12 @@ void init_devices() {
     ESP_LOGD(TAG, "ssd1680_init took %lldus\n", end-start);
     ESP_ERROR_CHECK(ret);
 
-    ESP_LOGI(TAG, "Initializing I2C...");
+    /*
     i2c_master_bus_config_t i2c_bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = -1,
-        .scl_io_num = 18,
-        .sda_io_num = 19,
+        .i2c_port = LP_I2C_NUM_0,
+        .scl_io_num = GPIO_NUM_1,
+        .sda_io_num = GPIO_NUM_0,
         .glitch_ignore_cnt = 7,
     };
     i2c_master_bus_handle_t bus_handle;
@@ -280,11 +284,10 @@ void init_devices() {
 
     i2c_device_config_t i2c_dev_conf = sht4x_i2c_config(SHT4x_I2C_FAST_MODE);
     ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &i2c_dev_conf, &sht41_dev_handle));
+    */
 }
 
 static RTC_DATA_ATTR struct Forecast g_forecast;
-static RTC_DATA_ATTR TempData g_temp_data;
-static RTC_DATA_ATTR TempData g_rel_hum_data;
 
 static gui_data_t gui_data;
 static bitui_ctx_t bitui_handle;
@@ -444,7 +447,7 @@ void vTask_gui_tick(void * pvParameters)
     };
 
     bitui_t ctx = &bitui_handle;
-    typeof(gui_data) old_gui_data = gui_data;
+    //typeof(gui_data) old_gui_data = gui_data;
 
     gui_tick(ctx);
 
@@ -474,24 +477,24 @@ void vTask_gui_tick(void * pvParameters)
     }
 }
 
-static float *ringbuf_emplace(TempData *buf) {
-    if (buf->count < 32) return &buf->items[buf->count++];
-    size_t new_item = buf->start;
-    buf->start = (buf->start + 1) % 32;
-    return &buf->items[new_item];
-}
-
+/*
 static void load_sensors_data(void) {
     sht4x_result_t res = sht4x_cmd(sht41_dev_handle, SHT4x_MEASURE_HIGH_PRECISION);
     ESP_ERROR_CHECK(res.err);
 
-    sht4x_sample_t sample = sht4x_convert(res.measurement);
+        sht4x_sample_t sample = sht4x_convert(measurement);
 
-    ESP_LOGI(TAG, "Temp : %.1f°C ±0.2 \t\tHumidity : %.1f%% ±2 ", sample.temperature_celcius, sample.relative_humidity);
+        ESP_LOGI(TAG, "Temp : %.1f°C ±0.2 \t\tHumidity : %.1f%% ±2 ", sample.temperature_celcius, sample.relative_humidity);
 
-    *ringbuf_emplace(&g_temp_data) = sample.temperature_celcius;
-    *ringbuf_emplace(&g_rel_hum_data) = sample.relative_humidity;
+    gui_data.temp_rh_err = ulp_sensor_err;
+    if (gui_data.temp_rh_err == ESP_OK) {
+        sht4x_raw_sample_t measurement = {
+            .raw_temperature = (uint16_t)((ulp_sensor_val >> 16) & 0xffff),
+            .raw_humidity    = (uint16_t)((ulp_sensor_val >>  0) & 0xffff),
+        };
+    }
 }
+*/
 
 static void load_weather_data(void) {
     static TaskHandle_t xTask_gui_tick = NULL;
@@ -508,30 +511,46 @@ static void load_weather_data(void) {
     gui_data.tick = 0;
     gui_data.current_screen = GUI_HOME;
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-
     https_get_request(WEATHER_WEB_URL, WEATHER_REQUEST, decode_weather);
 
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     s_retry_num = NO_RETRY;
     ESP_ERROR_CHECK(esp_wifi_stop());
 
     esp_netif_sntp_deinit();
 
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
     if (xTask_gui_tick) {
         vTaskDelete(xTask_gui_tick);
         xTask_gui_tick = NULL;
     }
 }
 
+extern const uint8_t bin_start[] asm("_binary_ulp_eink_dashboard_bin_start");
+extern const uint8_t bin_end[]   asm("_binary_ulp_eink_dashboard_bin_end");
+
+void start_ulp_program() {
+    ESP_LOGI(TAG, "Initializing LP I2C...");
+    const lp_core_i2c_cfg_t i2c_cfg = LP_CORE_I2C_DEFAULT_CONFIG(); // SDA: GPIO_6, SCL: GPIO_7, speed: 400Khz
+    ESP_ERROR_CHECK(lp_core_i2c_master_init(LP_I2C_NUM_0, &i2c_cfg));
+
+    ESP_ERROR_CHECK(ulp_lp_core_load_binary(bin_start,
+        (bin_end - bin_start)));
+
+    ulp_lp_core_cfg_t cfg = {
+        .wakeup_source = ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER,
+        .lp_timer_sleep_duration_us = 1 /* min */ * 60 /* s */ * 1000 * /* ms */ 1000 /* us */,
+    };
+
+    ESP_ERROR_CHECK(ulp_lp_core_run(&cfg));
+    ESP_LOGI(TAG, "ULP LP Core program start schedueld every 1min.");
+}
+
 void app_main(void)
 {
     esp_err_t ret;
     gui_data.forecast = &g_forecast;
-    gui_data.temp_data = &g_temp_data;
-    gui_data.rel_hum_data = &g_rel_hum_data;
 
     init_devices();
 
@@ -539,7 +558,12 @@ void app_main(void)
     tzset();
 
     switch (esp_sleep_get_wakeup_cause()) {
+    case ESP_SLEEP_WAKEUP_ULP:
     case ESP_SLEEP_WAKEUP_TIMER: {
+            static ulp_sample_ringbuf_t local_copy;
+            _Static_assert(sizeof(ulp_sample_ringbuf) == sizeof(local_copy));
+            memcpy(&local_copy, (uint8_t*)&ulp_sample_ringbuf, sizeof(local_copy));
+            gui_data.samples = &local_copy;
             bitui_handle = (bitui_ctx_t){
                 .width = SCREEN_ROWS,
                 .height = SCREEN_COLS,
@@ -547,14 +571,13 @@ void app_main(void)
                 .framebuffer = framebuffer,
                 .color = true,
             };
-            load_sensors_data();
+            //load_sensors_data();
             gui_data.tick = 0;
             gui_data.current_screen = GUI_HOME;
             gui_tick(&bitui_handle);
         } break;
-    case ESP_SLEEP_WAKEUP_UNDEFINED:
     default:
-        load_sensors_data();
+        start_ulp_program();
         load_weather_data();
         break;
     }
@@ -564,7 +587,11 @@ void app_main(void)
     ret = ssd1680_deinit(&ssd1680_handle);
     ESP_ERROR_CHECK(ret);
 
-    esp_sleep_enable_timer_wakeup(10 /* min */ * 60 /* s */ * 1000 * /* ms */ 1000 /* us */);
+    //esp_sleep_enable_timer_wakeup(10 /* min */ * 60 /* s */ * 1000 * /* ms */ 1000 /* us */);
+    esp_sleep_enable_ulp_wakeup();
+
+    // Configure the RTC domain (peripherals and RTC GPIOs) to stay on even during deep sleep
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
 
     esp_deep_sleep_start();
 }

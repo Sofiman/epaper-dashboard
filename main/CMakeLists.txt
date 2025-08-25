@@ -6,6 +6,7 @@ idf_component_register(SRCS "eink-dashboard.c"
                     REQUIRES esp-tls
                     REQUIRES esp_timer
                     REQUIRES driver
+                    REQUIRES ulp
 
                     REQUIRES ssd1680
                     REQUIRES bitui
@@ -14,3 +15,4 @@ idf_component_register(SRCS "eink-dashboard.c"
                     REQUIRES sht4x
                       )
 
+ulp_add_project("ulp_eink_dashboard" "${CMAKE_SOURCE_DIR}/main/ulp/")

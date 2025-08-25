@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include "driver/i2c_master.h"
 
 #define SHT4x_I2C_ADDR 0x44
 
@@ -10,6 +9,9 @@ typedef enum {
     SHT4x_I2C_FAST_MODE      = 400000,  // 400 Khz
     SHT4x_I2C_FAST_MODE_PLUS = 1000000, //   1 Mhz
 } sht4x_i2c_speed_t;
+
+#ifndef SHT4x_LP_CORE_I2C
+#include "driver/i2c_master.h"
 
 typedef i2c_master_dev_handle_t sht4x_handle_t;
 
@@ -20,6 +22,12 @@ static inline i2c_device_config_t sht4x_i2c_config(sht4x_i2c_speed_t speed) {
         .scl_speed_hz = speed,
     };
 }
+#else
+#include "ulp_lp_core_i2c.h"
+#include "ulp_lp_core_utils.h"
+
+typedef i2c_port_t sht4x_handle_t;
+#endif
 
 typedef enum {
     // Soft and hard reset take max 1ms
@@ -42,7 +50,10 @@ typedef enum {
 } sht4x_cmd_t;
 
 extern const uint8_t SHT4x_CMD_TO_REGISTER[];
-extern const uint16_t SHT4x_CMD_MAX_DURATION_MS[];
+extern const int8_t SHT4x_CMD_MAX_DURATION_MS[];
+#define SHT4x_CMD_DURATION_HEATER__100ms -1
+#define SHT4x_CMD_DURATION_HEATER_1000ms -2
+#define SHT4x_MAX_DURATION_MS_OF_CMD(Cmd) (SHT4x_CMD_MAX_DURATION_MS[(Cmd)] >= 0 ? (uint16_t)SHT4x_CMD_MAX_DURATION_MS[Cmd] : (9 + (SHT4x_CMD_MAX_DURATION_MS[Cmd] == SHT4x_CMD_DURATION_HEATER__100ms) ? 110 : 1100))
 
 typedef struct {
     // uint8_t must be used to keep the alignment to 1 byte
