@@ -18,9 +18,11 @@ _Static_assert(ringbuf_check_cap_power_of_2(2) == 2);
 
 static inline uint16_t ringbuf_push(volatile uint16_t *start, volatile uint16_t *count, uint16_t cap_power_of_2_minus_one) {
     uint16_t count_val = *count;
+    if (count_val <= cap_power_of_2_minus_one) {
+        *count = count_val + 1;
+        return count_val;
+    }
     uint16_t new_item = *start;
     *start = (new_item + 1) & cap_power_of_2_minus_one;
-    if (count_val <= cap_power_of_2_minus_one)
-        *count = count_val + 1;
     return new_item;
 }
