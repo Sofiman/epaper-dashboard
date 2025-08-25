@@ -3,7 +3,7 @@
 #include "ringbuf.h"
 
 typedef uint64_t ulp_sample_flags_t;
-static inline ulp_sample_flags_t ulp_sample_flags_from(uint64_t timestamp_48bits, uint8_t sht4x_err, uint8_t scd4x_err) {
+static inline ulp_sample_flags_t ulp_sample_flags_from_parts(uint64_t timestamp_48bits, uint8_t sht4x_err, uint8_t scd4x_err) {
     return ((uint64_t)scd4x_err << 56) | ((uint64_t)sht4x_err << 48) | timestamp_48bits;
 }
 

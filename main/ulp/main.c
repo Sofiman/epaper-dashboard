@@ -3,11 +3,11 @@
 #include "ulp_lp_core_utils.h"
 #include "ulp_lp_core_gpio.h"
 
+#define LP_PINS
+#include "../pins.h"
 #include "sht4x.h"
 #include "ringbuf.h"
 #include "common.h"
-
-#define HB_LED_PIN LP_IO_NUM_5
 
 #define RTC_TIMER_BASE 0x600B0C00
 #define RTC_TIMER_UPDATE_REG (RTC_TIMER_BASE + 0x0010)
@@ -31,10 +31,10 @@ volatile uint64_t last_lp_core_wakeup_rtc_ticks;
 
 int main(void)
 {
-    ulp_lp_core_gpio_init(HB_LED_PIN);
-    ulp_lp_core_gpio_set_output_mode(HB_LED_PIN, RTCIO_LL_OUTPUT_NORMAL);
-    ulp_lp_core_gpio_output_enable(HB_LED_PIN);
-    ulp_lp_core_gpio_set_level(HB_LED_PIN, 1);
+    ulp_lp_core_gpio_init(PIN_HB_LED);
+    ulp_lp_core_gpio_set_output_mode(PIN_HB_LED, RTCIO_LL_OUTPUT_NORMAL);
+    ulp_lp_core_gpio_output_enable(PIN_HB_LED);
+    ulp_lp_core_gpio_set_level(PIN_HB_LED, 1);
 
     ulp_sample_t cur_sample = { 0 };
 
@@ -42,13 +42,13 @@ int main(void)
     cur_sample.sht4x_raw_sample = sht4x_raw_measurement(sht4x_res);
 
     uint64_t rtc_timer_val = ulp_lp_core_rtc_timer_read();
-    cur_sample.flags = ulp_sample_flags_from(rtc_timer_val, sht4x_res.err & 0xff, -1);
+    cur_sample.flags = ulp_sample_flags_from_parts(rtc_timer_val, sht4x_res.err & 0xff, -1);
 
     *ringbuf_emplace(&sample_ringbuf) = cur_sample;
 
     last_lp_core_wakeup_rtc_ticks = rtc_timer_val;
 
-    ulp_lp_core_gpio_set_level(HB_LED_PIN, 0);
+    ulp_lp_core_gpio_set_level(PIN_HB_LED, 0);
     ulp_lp_core_wakeup_main_processor();
 
     return 0; /* ulp_lp_core_halt() is called automatically when main exits */

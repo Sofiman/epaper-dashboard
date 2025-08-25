@@ -32,6 +32,7 @@
 #include "bitui.h"
 #include "gui.h"
 #include "sht4x.h"
+#include "pins.h"
 
 static const char *TAG = "main";
 
@@ -235,9 +236,9 @@ void init_devices() {
 
     ESP_LOGI(TAG, "Initializing SPI...");
     spi_bus_config_t buscfg = {
-        .mosi_io_num = GPIO_NUM_3,
+        .mosi_io_num = PIN_EPD_SPI_MOSI,
         .miso_io_num = -1,
-        .sclk_io_num = GPIO_NUM_2,
+        .sclk_io_num = PIN_EPD_SPI_SCLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .data4_io_num = -1,
@@ -258,10 +259,10 @@ void init_devices() {
         .controller = SSD1685,
         .rotation = SSD1680_ROT_090,
         .host = SPI2_HOST,
-        .busy_pin = GPIO_NUM_19,
-        .reset_pin = GPIO_NUM_14,
-        .dc_pin = GPIO_NUM_18,
-        .cs_pin = GPIO_NUM_4,
+        .busy_pin = PIN_EPD_BUSY,
+        .reset_pin = PIN_EPD_RESET,
+        .dc_pin = PIN_EPD_DC,
+        .cs_pin = PIN_EPD_CS,
 
         .rows = SCREEN_ROWS,
         .cols = SCREEN_COLS,
@@ -532,7 +533,9 @@ extern const uint8_t bin_end[]   asm("_binary_ulp_eink_dashboard_bin_end");
 
 void start_ulp_program() {
     ESP_LOGI(TAG, "Initializing LP I2C...");
-    const lp_core_i2c_cfg_t i2c_cfg = LP_CORE_I2C_DEFAULT_CONFIG(); // SDA: GPIO_6, SCL: GPIO_7, speed: 400Khz
+    const lp_core_i2c_cfg_t i2c_cfg = LP_CORE_I2C_DEFAULT_CONFIG(); // speed: 400Khz
+    assert(i2c_cfg.i2c_pin_cfg.sda_io_num == PIN_LP_I2C_SDA);
+    assert(i2c_cfg.i2c_pin_cfg.scl_io_num == PIN_LP_I2C_SCL);
     ESP_ERROR_CHECK(lp_core_i2c_master_init(LP_I2C_NUM_0, &i2c_cfg));
 
     ESP_ERROR_CHECK(ulp_lp_core_load_binary(bin_start,
