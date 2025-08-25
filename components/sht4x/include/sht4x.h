@@ -29,31 +29,42 @@ static inline i2c_device_config_t sht4x_i2c_config(sht4x_i2c_speed_t speed) {
 typedef i2c_port_t sht4x_handle_t;
 #endif
 
-typedef enum {
-    // Soft and hard reset take max 1ms
-    SHT4x_SOFT_RESET,
-    SHT4x_READ_SERIAL_NUMBER,
+typedef enum : uint8_t {
+    /* Misc commands */
 
-    // Measurement takes max 9ms
-    SHT4x_MEASURE_HIGH_PRECISION,
-    // Measurement takes max 5ms
-    SHT4x_MEASURE_MEDIUM_PRECISION,
-    // Measurement takes max 2ms
-    SHT4x_MEASURE_LOW_PRECISION,
+    SHT4x_SOFT_RESET = 0x94,
+    SHT4x_READ_SERIAL_NUMBER = 0x89,
 
-    SHT4x_HEAT__20mw__100ms_MEASURE_HIGH_PRECISION,
-    SHT4x_HEAT__20mw_1000ms_MEASURE_HIGH_PRECISION,
-    SHT4x_HEAT_100mw__100ms_MEASURE_HIGH_PRECISION,
-    SHT4x_HEAT_100mw_1000ms_MEASURE_HIGH_PRECISION,
-    SHT4x_HEAT_200mw__100ms_MEASURE_HIGH_PRECISION,
-    SHT4x_HEAT_200mw_1000ms_MEASURE_HIGH_PRECISION,
+    /* Measurement commands */
+
+    SHT4x_MEASURE_HIGH_PRECISION = 0xFD,
+    SHT4x_MEASURE_MEDIUM_PRECISION = 0xF6,
+    SHT4x_MEASURE_LOW_PRECISION = 0xE0,
+
+    /* Heater & Measurement commands */
+
+    SHT4x_HEAT__20mw__100ms_MEASURE_HIGH_PRECISION = 0x15,
+    SHT4x_HEAT__20mw_1000ms_MEASURE_HIGH_PRECISION = 0x1E,
+    SHT4x_HEAT_100mw__100ms_MEASURE_HIGH_PRECISION = 0x24,
+    SHT4x_HEAT_100mw_1000ms_MEASURE_HIGH_PRECISION = 0x2F,
+    SHT4x_HEAT_200mw__100ms_MEASURE_HIGH_PRECISION = 0x32,
+    SHT4x_HEAT_200mw_1000ms_MEASURE_HIGH_PRECISION = 0x39,
+
+#define SHT4x_SOFT_RESET_MAX_DURATION_US 1000u
+#define SHT4x_READ_SERIAL_NUMBER_MAX_DURATION_US 0u
+
+#define SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US 8300u
+#define SHT4x_MEASURE_MEDIUM_PRECISION_DURATION_US 4500u
+#define SHT4x_MEASURE_LOW_PRECISION_DURATION_US 1600u
+
+#define SHT4x_HEAT__20mw__100ms_MEASURE_HIGH_PRECISION_MAX_DURATION_US (110000u + SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US)
+#define SHT4x_HEAT_100mw__100ms_MEASURE_HIGH_PRECISION_MAX_DURATION_US (110000u + SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US)
+#define SHT4x_HEAT_200mw__100ms_MEASURE_HIGH_PRECISION_MAX_DURATION_US (110000u + SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US)
+
+#define SHT4x_HEAT__20mw_1000ms_MEASURE_HIGH_PRECISION_MAX_DURATION_US (1000000u + SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US)
+#define SHT4x_HEAT_100mw_1000ms_MEASURE_HIGH_PRECISION_MAX_DURATION_US (1000000u + SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US)
+#define SHT4x_HEAT_200mw_1000ms_MEASURE_HIGH_PRECISION_MAX_DURATION_US (1000000u + SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US)
 } sht4x_cmd_t;
-
-extern const uint8_t SHT4x_CMD_TO_REGISTER[];
-extern const int8_t SHT4x_CMD_MAX_DURATION_MS[];
-#define SHT4x_CMD_DURATION_HEATER__100ms -1
-#define SHT4x_CMD_DURATION_HEATER_1000ms -2
-#define SHT4x_MAX_DURATION_MS_OF_CMD(Cmd) (SHT4x_CMD_MAX_DURATION_MS[(Cmd)] >= 0 ? (uint16_t)SHT4x_CMD_MAX_DURATION_MS[Cmd] : (9 + (SHT4x_CMD_MAX_DURATION_MS[Cmd] == SHT4x_CMD_DURATION_HEATER__100ms) ? 110 : 1100))
 
 typedef struct {
     // uint8_t must be used to keep the alignment to 1 byte
@@ -83,10 +94,22 @@ static inline sht4x_sample_t sht4x_convert(sht4x_raw_sample_t in) {
 
 typedef struct {
     esp_err_t err;
-    union {
-        sht4x_raw_sample_t measurement;
-        uint32_t serial_number;
-    };
+    sht4x_word_t frames[2];
 } sht4x_result_t;
 
-sht4x_result_t sht4x_cmd(sht4x_handle_t handle, sht4x_cmd_t cmd);
+#define sht4x_cmd(Handle, Cmd) _sht4x_cmd((Handle), (Cmd), (Cmd ## _MAX_DURATION_US))
+sht4x_result_t _sht4x_cmd(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_max_duration_us);
+
+static inline sht4x_raw_sample_t sht4x_raw_measurement(sht4x_result_t result) {
+    sht4x_raw_sample_t measurement;
+    measurement.raw_temperature = ((uint16_t)result.frames[0].data[0] << 8) | ((uint16_t)result.frames[0].data[1]);
+    measurement.raw_humidity    = ((uint16_t)result.frames[1].data[0] << 8) | ((uint16_t)result.frames[1].data[1]);
+    return measurement;
+}
+
+static inline uint32_t sht4x_serial_number(sht4x_result_t result) {
+    return ((uint32_t)result.frames[0].data[0]) << 24
+        | ((uint32_t)result.frames[0].data[1])  << 16
+        | ((uint32_t)result.frames[1].data[0])  <<  8
+        | ((uint32_t)result.frames[1].data[1])  <<  0;
+}

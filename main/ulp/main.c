@@ -41,34 +41,6 @@ volatile RingBufStatic(sample_t, 32) sample_ringbuf;
 
 volatile uint64_t last_lp_core_wakeup_rtc_ticks;
 
-#define sht4x_i2c_write(Handle, Buf, Len, Timeout) lp_core_i2c_master_write_to_device((Handle), SHT4x_I2C_ADDR, (Buf), (Len), (Timeout))
-#define sht4x_i2c_read(Handle, Buf, Len, Timeout) lp_core_i2c_master_read_from_device((Handle), SHT4x_I2C_ADDR, (Buf), (Len), (Timeout))
-static inline sht4x_result_t sht4x_measure(void)
-{
-    sht4x_result_t res = { 0 };
-
-    const uint8_t reg = 0xFD;
-    res.err = sht4x_i2c_write(LP_I2C_NUM_0, &reg, sizeof(reg), /* TODO */ 5000);
-    if (res.err != ESP_OK) return res;
-
-    ulp_lp_core_delay_cycles(134000); // 1142/16000000 = ~8.375ms
-
-    sht4x_word_t frame[2];
-    _Static_assert(sizeof(frame) == 6, "SHT4x frame is always 6 bytes");
-
-    res.err = sht4x_i2c_read(LP_I2C_NUM_0, (uint8_t*)&frame, sizeof(frame), /* TODO */ 5000);
-    if (res.err != ESP_OK) return res;
-
-    if (!sht4x_verify_crc8(frame[0])) res.err = ESP_ERR_INVALID_CRC;
-    if (!sht4x_verify_crc8(frame[1])) res.err = ESP_ERR_INVALID_CRC;
-    if (res.err != ESP_OK) return res;
-
-    res.measurement.raw_temperature = ((uint16_t)frame[0].data[0] << 8) | ((uint16_t)frame[0].data[1]);
-    res.measurement.raw_humidity    = ((uint16_t)frame[1].data[0] << 8) | ((uint16_t)frame[1].data[1]);
-
-    return res;
-}
-
 int main(void)
 {
     ulp_lp_core_gpio_init(HB_LED_PIN);
@@ -78,8 +50,8 @@ int main(void)
 
     sample_t cur_sample = { 0 };
 
-    sht4x_result_t sht4x_res = sht4x_measure();
-    cur_sample.sht4x_raw_sample = sht4x_res.measurement;
+    sht4x_result_t sht4x_res = sht4x_cmd(LP_I2C_NUM_0, SHT4x_MEASURE_HIGH_PRECISION);
+    cur_sample.sht4x_raw_sample = sht4x_raw_measurement(sht4x_res);
 
     uint64_t rtc_timer_val = ulp_lp_core_rtc_timer_read();
     cur_sample.ext_timestamp = build_ext_timestamp(rtc_timer_val, sht4x_res.err & 0xff, -1);
