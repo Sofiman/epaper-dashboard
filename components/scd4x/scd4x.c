@@ -34,7 +34,7 @@ uint8_t scd4x_calculate_crc8(uint16_t word)
 #define scd4x_delay_ms(Ms) ulp_lp_core_delay_us((Ms) * 1000)
 #endif
 
-esp_err_t _scd4x_cmd(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_duration_ms)
+esp_err_t scd4x_cmd_(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_duration_ms)
 {
     _Static_assert(sizeof(cmd) == 2);
     esp_err_t ret = scd4x_i2c_write(handle, &cmd, sizeof(cmd), -1);
@@ -46,7 +46,7 @@ esp_err_t _scd4x_cmd(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_du
     return ret;
 }
 
-esp_err_t _scd4x_set(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t value)
+esp_err_t scd4x_set_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t value)
 {
     uint8_t buf[sizeof(cmd) + sizeof(scd4x_word_t)];
 
@@ -63,7 +63,7 @@ esp_err_t _scd4x_set(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t va
     return ret;
 }
 
-esp_err_t _scd4x_get(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t *out_words, uint8_t word_count)
+esp_err_t scd4x_get_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t *out_words, uint8_t word_count)
 {
 #define SCD4x_GET_MAX_WORD_COUNT 3
     if (word_count == 0 || word_count > SCD4x_GET_MAX_WORD_COUNT)

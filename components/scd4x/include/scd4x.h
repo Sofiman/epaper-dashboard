@@ -181,10 +181,10 @@ uint8_t scd4x_calculate_crc8(uint16_t word);
 // ... _DURATION_MS" means that you are using the wrong function:
 // - For *GET* commands use scd4x_get with the appropriate struct
 // - For *SET* commands use scd4x_set with the appropriate struct
-#define scd4x_cmd(Handle, Cmd) _scd4x_cmd((Handle), (Cmd), Cmd ## _DURATION_MS);
-esp_err_t _scd4x_cmd(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_duration_us);
+#define scd4x_cmd(Handle, Cmd) scd4x_cmd_((Handle), (Cmd), (Cmd ## _DURATION_MS));
+esp_err_t scd4x_cmd_(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_duration_us);
 
-#define scd4x_set(Handle, Payload) _scd4x_set((Handle), _Generic((Payload), \
+#define scd4x_set(Handle, Payload) scd4x_set_((Handle), _Generic((Payload), \
             scd4x_cmd_temp_offset_t: SCD4x_SET_TEMPERATURE_OFFSET, \
             scd4x_cmd_altitude_t: SCD4x_SET_SENSOR_ALTITUDE, \
             scd4x_cmd_ambient_pressure_t: SCD4x_SET_GET_AMBIENT_PRESSURE, \
@@ -193,9 +193,9 @@ esp_err_t _scd4x_cmd(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_du
             scd4x_cmd_asc_initial_period_t: SCD4x_SET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, \
             scd4x_cmd_asc_standard_period_t: SCD4x_SET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD \
             ), *(scd4x_cmd_word_t*)&(Payload))
-esp_err_t _scd4x_set(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t value);
+esp_err_t scd4x_set_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t value);
 
-#define scd4x_get(Handle, PayloadPtr) _scd4x_get((Handle), _Generic(*(PayloadPtr), \
+#define scd4x_get(Handle, PayloadPtr) scd4x_get_((Handle), _Generic(*(PayloadPtr), \
             scd4x_cmd_read_measurement_t: SCD4x_READ_MEASUREMENT, \
             scd4x_cmd_temp_offset_t: SCD4x_GET_TEMPERATURE_OFFSET, \
             scd4x_cmd_altitude_t: SCD4x_GET_SENSOR_ALTITUDE, \
@@ -208,4 +208,4 @@ esp_err_t _scd4x_set(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t va
             scd4x_cmd_asc_initial_period_t: SCD4x_GET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, \
             scd4x_cmd_asc_standard_period_t: SCD4x_GET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD \
             ), (scd4x_cmd_word_t*)(PayloadPtr), sizeof(PayloadPtr)/sizeof(scd4x_cmd_word_t))
-esp_err_t _scd4x_get(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t *out_words, uint8_t word_count);
+esp_err_t scd4x_get_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t *out_words, uint8_t word_count);
