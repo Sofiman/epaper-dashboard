@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sensirion_common.h"
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -95,12 +97,6 @@ typedef enum : uint16_t {
     #define SCD4x_WAKE_UP_DURATION_MS 30
 } scd4x_cmd_t;
 
-typedef struct {
-    // uint8_t must be used to keep the alignment to 1 byte
-    uint8_t data[sizeof(uint16_t)];
-    uint8_t crc;
-} scd4x_word_t;
-
 typedef uint16_t scd4x_cmd_word_t;
 typedef struct {
     uint16_t pressure_hpa; // hPa
@@ -174,8 +170,6 @@ typedef struct {
     uint16_t raw_variant;
 } scd4x_cmd_sensor_variant_t;
 #define SCD4x_SENSOR_VARIANT_FROM_RAW(RawVariant) ((enum scd4x_sensor_variant)((RawVariant) & 0xf000))
-
-uint8_t scd4x_calculate_crc8(uint16_t word);
 
 // If you have encountered a compiler error "... use of undeclared identifier
 // ... _DURATION_MS" means that you are using the wrong function:

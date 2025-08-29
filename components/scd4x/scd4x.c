@@ -48,7 +48,7 @@ esp_err_t scd4x_cmd_(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_du
 
 esp_err_t scd4x_set_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t value)
 {
-    uint8_t buf[sizeof(cmd) + sizeof(scd4x_word_t)];
+    uint8_t buf[sizeof(cmd) + sizeof(sensirion_word_t)];
 
     memcpy(buf,                 cmd,   sizeof(cmd));
     memcpy(buf + sizeof(cmd), value, sizeof(value));
@@ -68,17 +68,17 @@ esp_err_t scd4x_get_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t *o
 #define SCD4x_GET_MAX_WORD_COUNT 3
     if (word_count == 0 || word_count > SCD4x_GET_MAX_WORD_COUNT)
         return ESP_ERR_INVALID_ARG;
-    sht4x_word_t res[SCD4x_GET_MAX_WORD_COUNT];
+    sensirion_word_t res[SCD4x_GET_MAX_WORD_COUNT];
 
     esp_err_t ret = _scd4x_cmd(handle, cmd, 1);
     if (ret != ESP_OK) return ret;
 
-    res.err = sht4x_i2c_read(handle, (uint8_t*)&res, word_count * sizeof(res[0]), -1);
+    res.err = scd4x_i2c_read(handle, (uint8_t*)&res, word_count * sizeof(res[0]), -1);
     if (res.err != ESP_OK) return res;
 
     for (int i = 0; i < word_count; i++) {
         const uint16_t word = res[i].data[1] << 16 | res[i].data[0];
-        if (scd4x_calculate_crc8(word) != res[i].crc) res.err = ESP_ERR_INVALID_CRC;
+        if (sensirion_common_calculate_crc8(word) != res[i].crc) res.err = ESP_ERR_INVALID_CRC;
         out_words[i] = word;
     }
 

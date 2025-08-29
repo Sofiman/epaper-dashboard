@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sensirion_common.h"
+
 #include <stdint.h>
 
 #define SHT4x_I2C_ADDR 0x44
@@ -67,14 +69,6 @@ typedef enum : uint8_t {
 } sht4x_cmd_t;
 
 typedef struct {
-    // uint8_t must be used to keep the alignment to 1 byte
-    uint8_t data[sizeof(uint16_t)];
-    uint8_t crc;
-} sht4x_word_t;
-
-int sht4x_verify_crc8(sht4x_word_t word);
-
-typedef struct {
     uint16_t raw_temperature;
     uint16_t raw_humidity;
 } sht4x_raw_sample_t;
@@ -94,7 +88,7 @@ static inline sht4x_sample_t sht4x_convert(sht4x_raw_sample_t in) {
 
 typedef struct {
     esp_err_t err;
-    sht4x_word_t frames[2];
+    sensirion_word_t frames[2];
 } sht4x_result_t;
 
 #define sht4x_cmd(Handle, Cmd) sht4x_cmd_((Handle), (Cmd), (Cmd ## _MAX_DURATION_US))
