@@ -97,8 +97,8 @@ typedef struct {
     sht4x_word_t frames[2];
 } sht4x_result_t;
 
-#define sht4x_cmd(Handle, Cmd) _sht4x_cmd((Handle), (Cmd), (Cmd ## _MAX_DURATION_US))
-sht4x_result_t _sht4x_cmd(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_max_duration_us);
+#define sht4x_cmd(Handle, Cmd) sht4x_cmd_((Handle), (Cmd), (Cmd ## _MAX_DURATION_US))
+sht4x_result_t sht4x_cmd_(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_max_duration_us);
 
 static inline sht4x_raw_sample_t sht4x_raw_measurement(sht4x_result_t result) {
     sht4x_raw_sample_t measurement;

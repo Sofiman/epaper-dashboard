@@ -34,7 +34,7 @@ int sht4x_verify_crc8(const sht4x_word_t word)
 #define sht4x_delay_us(Us) ulp_lp_core_delay_us((Us) + 10)
 #endif
 
-sht4x_result_t _sht4x_cmd(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_max_duration_us)
+sht4x_result_t sht4x_cmd_(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_max_duration_us)
 {
     sht4x_result_t res = { 0 };
 
