@@ -9,7 +9,8 @@ typedef struct {
 } sensirion_word_t;
 
 #define sensirion_common_calculate_crc8(Word) sensirion_common_calculate_crc8_(_Generic((Word), \
-        uint16_t: (Word),\
-        uint8_t[2]: ((Word)[0] | (Word)[1] << 16)\
+        uint16_t: (Word), \
+        const sensirion_word_t*: ((Word)->data[0] | (Word)->data[1] << 16), \
+        sensirion_word_t*: ((Word)->data[0] | (Word)->data[1] << 16) \
         ))
 uint8_t sensirion_common_calculate_crc8_(uint16_t word);

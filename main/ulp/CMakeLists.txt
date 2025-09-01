@@ -5,7 +5,7 @@ set(ulp_app_name, "ulp_eink_dashboard")
 # Project/target name is passed from the main project to allow IDF to have a dependency on this target
 # as well as embed the binary into the main app
 project(${ULP_APP_NAME})
-add_executable(${ULP_APP_NAME} main.c "${lib_path}/sht4x/sht4x.c")
+add_executable(${ULP_APP_NAME} main.c "${lib_path}/sensirion_common/sensirion_common.c" "${lib_path}/sht4x/sht4x.c")
 
 # Import the ULP project helper functions
 include(IDFULPProject)

@@ -28,8 +28,8 @@ sht4x_result_t sht4x_cmd_(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_m
     res.err = sht4x_i2c_read(handle, (uint8_t*)&res.frames, sizeof(res.frames), -1);
     if (res.err != ESP_OK) return res;
 
-    if (sensirion_common_calculate_crc8(res.frames[0].data) != res.frames[0].crc) res.err = ESP_ERR_INVALID_CRC;
-    if (sensirion_common_calculate_crc8(res.frames[1].data) != res.frames[1].crc) res.err = ESP_ERR_INVALID_CRC;
+    if (sensirion_common_calculate_crc8(&res.frames[0]) != res.frames[0].crc) res.err = ESP_ERR_INVALID_CRC;
+    if (sensirion_common_calculate_crc8(&res.frames[1]) != res.frames[1].crc) res.err = ESP_ERR_INVALID_CRC;
 
     return res;
 }
