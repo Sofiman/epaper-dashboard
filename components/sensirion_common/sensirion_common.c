@@ -1,6 +1,6 @@
 #include "sensirion_common.h"
 
-uint8_t sensirion_common_calculate_crc8_(uint16_t word)
+uint8_t sensirion_common_calculate_crc8_u16(uint16_t word)
 {
     // CRC8(0xBEEF) = 0x92
     enum {
