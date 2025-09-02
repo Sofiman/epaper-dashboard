@@ -4,7 +4,7 @@
 #define scd4x_i2c_write i2c_master_transmit
 #define scd4x_i2c_read i2c_master_receive
 #include <freertos/FreeRTOS.h>
-#define scd4x_delay_ms(Ms) vTaskDelay(Ms)
+#define scd4x_delay_ms(Ms) vTaskDelay(pdMS_TO_TICKS(Ms))
 #else
 #define scd4x_i2c_write(Handle, Buf, Len, Timeout) lp_core_i2c_master_write_to_device((Handle), SCD4x_I2C_ADDR, (Buf), (Len), (Timeout))
 #define scd4x_i2c_read(Handle, Buf, Len, Timeout) lp_core_i2c_master_read_from_device((Handle), SCD4x_I2C_ADDR, (Buf), (Len), (Timeout))
