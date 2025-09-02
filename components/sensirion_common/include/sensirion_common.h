@@ -14,5 +14,5 @@ typedef struct {
         )(Word)
 uint8_t sensirion_common_calculate_crc8_u16(uint16_t word);
 static inline uint8_t sensirion_common_calculate_crc8_word(sensirion_word_t word) {
-    return sensirion_common_calculate_crc8_u16(((uint16_t)word.data[0]) | ((uint16_t)word.data[1]) << 16);
+    return sensirion_common_calculate_crc8_u16(((uint16_t)word.data[0]) | ((uint16_t)word.data[1]) << 8);
 }
