@@ -169,13 +169,13 @@ enum scd4x_sensor_variant {
 typedef struct {
     uint16_t raw_variant;
 } scd4x_cmd_sensor_variant_t;
-#define SCD4x_SENSOR_VARIANT_FROM_RAW(RawVariant) ((enum scd4x_sensor_variant)((RawVariant) & 0xf000))
+#define SCD4x_SENSOR_VARIANT_FROM_RAW(RawVariant) ((enum scd4x_sensor_variant)((RawVariant) >> 12))
 
 // If you have encountered a compiler error "... use of undeclared identifier
 // ... _DURATION_MS" means that you are using the wrong function:
 // - For *GET* commands use scd4x_get with the appropriate struct
 // - For *SET* commands use scd4x_set with the appropriate struct
-#define scd4x_cmd(Handle, Cmd) scd4x_cmd_((Handle), (Cmd), (Cmd ## _DURATION_MS));
+#define scd4x_cmd(Handle, Cmd) scd4x_cmd_((Handle), (Cmd), (Cmd ## _DURATION_MS))
 esp_err_t scd4x_cmd_(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_duration_us);
 
 #define scd4x_set(Handle, Payload) scd4x_set_((Handle), _Generic((Payload), \
@@ -201,5 +201,5 @@ esp_err_t scd4x_set_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t va
             scd4x_cmd_sensor_variant_t: SCD4x_GET_SENSOR_VARIANT, \
             scd4x_cmd_asc_initial_period_t: SCD4x_GET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD, \
             scd4x_cmd_asc_standard_period_t: SCD4x_GET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD \
-            ), (scd4x_cmd_word_t*)(PayloadPtr), sizeof(PayloadPtr)/sizeof(scd4x_cmd_word_t))
+            ), (scd4x_cmd_word_t*)(PayloadPtr), sizeof(*(PayloadPtr))/sizeof(scd4x_cmd_word_t))
 esp_err_t scd4x_get_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t *out_words, uint8_t word_count);
