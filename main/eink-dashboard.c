@@ -32,6 +32,7 @@
 #include "bitui.h"
 #include "gui.h"
 #include "sht4x.h"
+#include "scd4x.h"
 #include "pins.h"
 
 static const char *TAG = "main";
@@ -229,7 +230,9 @@ void wifi_init_sta(void)
 }
 
 ssd1680_handle_t ssd1680_handle;
-//i2c_master_dev_handle_t sht41_dev_handle;
+i2c_master_bus_handle_t i2c_bus_handle;
+i2c_master_dev_handle_t scd41_dev_handle;
+i2c_master_dev_handle_t sht41_dev_handle;
 
 void init_devices() {
     esp_err_t ret;
@@ -272,20 +275,23 @@ void init_devices() {
     ESP_LOGD(TAG, "ssd1680_init took %lldus\n", end-start);
     ESP_ERROR_CHECK(ret);
 
-    /*
     i2c_master_bus_config_t i2c_bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = LP_I2C_NUM_0,
-        .scl_io_num = GPIO_NUM_1,
-        .sda_io_num = GPIO_NUM_0,
+        .i2c_port = I2C_NUM_0,
+        .scl_io_num = PIN_LP_I2C_SCL,
+        .sda_io_num = PIN_LP_I2C_SDA,
         .glitch_ignore_cnt = 7,
     };
-    i2c_master_bus_handle_t bus_handle;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_config, &bus_handle));
+    ret = i2c_new_master_bus(&i2c_bus_config, &i2c_bus_handle);
+    ESP_ERROR_CHECK(ret);
 
-    i2c_device_config_t i2c_dev_conf = sht4x_i2c_config(SHT4x_I2C_FAST_MODE);
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &i2c_dev_conf, &sht41_dev_handle));
-    */
+    i2c_device_config_t i2c_dev_conf = scd4x_i2c_config(SCD4x_I2C_FAST_MODE);
+    ret = i2c_master_bus_add_device(i2c_bus_handle, &i2c_dev_conf, &scd41_dev_handle);
+    ESP_ERROR_CHECK(ret);
+
+    i2c_dev_conf = sht4x_i2c_config(SHT4x_I2C_FAST_MODE);
+    ret = i2c_master_bus_add_device(i2c_bus_handle, &i2c_dev_conf, &sht41_dev_handle);
+    ESP_ERROR_CHECK(ret);
 }
 
 static RTC_DATA_ATTR struct Forecast g_forecast;
@@ -478,25 +484,6 @@ void vTask_gui_tick(void * pvParameters)
     }
 }
 
-/*
-static void load_sensors_data(void) {
-    sht4x_result_t res = sht4x_cmd(sht41_dev_handle, SHT4x_MEASURE_HIGH_PRECISION);
-    ESP_ERROR_CHECK(res.err);
-
-        sht4x_sample_t sample = sht4x_convert(measurement);
-
-        ESP_LOGI(TAG, "Temp : %.1f°C ±0.2 \t\tHumidity : %.1f%% ±2 ", sample.temperature_celcius, sample.relative_humidity);
-
-    gui_data.temp_rh_err = ulp_sensor_err;
-    if (gui_data.temp_rh_err == ESP_OK) {
-        sht4x_raw_sample_t measurement = {
-            .raw_temperature = (uint16_t)((ulp_sensor_val >> 16) & 0xffff),
-            .raw_humidity    = (uint16_t)((ulp_sensor_val >>  0) & 0xffff),
-        };
-    }
-}
-*/
-
 static void load_weather_data(void) {
     static TaskHandle_t xTask_gui_tick = NULL;
 
@@ -526,6 +513,48 @@ static void load_weather_data(void) {
         vTaskDelete(xTask_gui_tick);
         xTask_gui_tick = NULL;
     }
+}
+
+static ulp_sample_ringbuf_t local_copy;
+_Static_assert(sizeof(ulp_sample_ringbuf) == sizeof(local_copy));
+
+void load_sensors_data(void) {
+    scd4x_cmd(scd41_dev_handle, SCD4x_WAKE_UP);
+    vTaskDelay(10);
+
+    ESP_ERROR_CHECK(scd4x_set(scd41_dev_handle, (scd4x_cmd_asc_t) { .asc_enabled = false }));
+
+    scd4x_cmd_sensor_variant_t sensor_variant = { 0 };
+    ESP_ERROR_CHECK(scd4x_get(scd41_dev_handle, &sensor_variant));
+    if (SCD4x_SENSOR_VARIANT_FROM_RAW(sensor_variant.raw_variant) == SCD41) {
+        ESP_LOGI(TAG, "Detected SCD41");
+    } else {
+        ESP_LOGI(TAG, "Unexpected SCD4x variant %04x", SCD4x_SENSOR_VARIANT_FROM_RAW(sensor_variant.raw_variant));
+    }
+
+    ESP_ERROR_CHECK(scd4x_cmd(scd41_dev_handle, SCD4x_MEASURE_SINGLE_SHOT));
+
+    scd4x_cmd_read_measurement_t measurement = { 0 };
+    ESP_ERROR_CHECK(scd4x_get(scd41_dev_handle, &measurement));
+    ESP_LOGI(TAG, "SCD4x Measurement: \tCO2 %hu ppm\t TEMP %.1f C \t RH %.1f %", measurement.co2_ppm, SCD4x_RAW_TEMPERATURE_TO_CELCIUS(measurement.raw_temperature), SCD4x_RAW_HUMIDITY_TO_RH(measurement.raw_humidity));
+
+    sht4x_result_t sht4x_res = sht4x_cmd(sht41_dev_handle, SHT4x_MEASURE_HIGH_PRECISION);
+    ESP_ERROR_CHECK(sht4x_res.err);
+    sht4x_sample_t sht4x_sample = sht4x_convert(sht4x_raw_measurement(sht4x_res));
+    ESP_LOGI(TAG, "SCD4x Measurement: \t TEMP %.1f C \t RH %.1f %", sht4x_sample.temperature_celcius, sht4x_sample.relative_humidity);
+
+    ESP_LOGI(TAG, "Powering down SCD4x...");
+    ESP_ERROR_CHECK(scd4x_cmd(scd41_dev_handle, SCD4x_POWER_DOWN));
+
+    *ringbuf_emplace(&local_copy) = (ulp_sample_t) {
+        .flags = 0,
+        .co2_ppm = measurement.co2_ppm,
+        .sht4x_raw_sample = sht4x_raw_measurement(sht4x_res)
+    };
+
+    ESP_ERROR_CHECK(i2c_master_bus_rm_device(scd41_dev_handle));
+    ESP_ERROR_CHECK(i2c_master_bus_rm_device(sht41_dev_handle));
+    ESP_ERROR_CHECK(i2c_del_master_bus(i2c_bus_handle));
 }
 
 extern const uint8_t bin_start[] asm("_binary_ulp_eink_dashboard_bin_start");
@@ -563,8 +592,6 @@ void app_main(void)
     switch (esp_sleep_get_wakeup_cause()) {
     case ESP_SLEEP_WAKEUP_ULP:
     case ESP_SLEEP_WAKEUP_TIMER: {
-            static ulp_sample_ringbuf_t local_copy;
-            _Static_assert(sizeof(ulp_sample_ringbuf) == sizeof(local_copy));
             memcpy(&local_copy, (uint8_t*)&ulp_sample_ringbuf, sizeof(local_copy));
             gui_data.samples = &local_copy;
             bitui_handle = (bitui_ctx_t){
@@ -580,6 +607,8 @@ void app_main(void)
             gui_tick(&bitui_handle);
         } break;
     default:
+        load_sensors_data();
+        gui_data.samples = &local_copy;
         start_ulp_program();
         load_weather_data();
         break;

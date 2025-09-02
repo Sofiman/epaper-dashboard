@@ -13,6 +13,7 @@ idf_component_register(SRCS "eink-dashboard.c"
                     REQUIRES immjson
                     REQUIRES gui
                     REQUIRES sht4x
+                    REQUIRES scd4x
                       )
 
 ulp_add_project("ulp_eink_dashboard" "${CMAKE_SOURCE_DIR}/main/ulp/")
