@@ -67,7 +67,7 @@ typedef enum : uint16_t {
     SCD4x_MEASURE_SINGLE_SHOT                     = 0x219D,
     SCD4x_MEASURE_SINGLE_SHOT_RHT_ONLY            = 0x2196,
     SCD4x_POWER_DOWN                              = 0x36E0,
-    SCD4x_WAKE_UP                                 = 0x36F6,
+    SCD4x_WAKE_UP                                 = 0x36F6, // Note: SCD4x does not acknowledge the wake_up command
     SCD4x_SET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD  = 0x2445,
     SCD4x_GET_AUTOMATIC_SELF_CALIBRATION_INITIAL_PERIOD  = 0x2340,
     SCD4x_SET_AUTOMATIC_SELF_CALIBRATION_STANDARD_PERIOD = 0x244E,
