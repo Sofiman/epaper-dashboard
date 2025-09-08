@@ -572,7 +572,7 @@ void start_ulp_program() {
 
     ulp_lp_core_cfg_t cfg = {
         .wakeup_source = ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER,
-        .lp_timer_sleep_duration_us = 1 /* min */ * 60 /* s */ * 1000 * /* ms */ 1000 /* us */,
+        .lp_timer_sleep_duration_us = ULP_WAKEUP_PERIOD_US,
     };
 
     ESP_ERROR_CHECK(ulp_lp_core_run(&cfg));

@@ -26,3 +26,5 @@ typedef struct [[gnu::packed]] {
 } ulp_sample_t;
 _Static_assert(sizeof(ulp_sample_t) == 14);
 typedef RingBufStatic(ulp_sample_t, 32) ulp_sample_ringbuf_t;
+
+#define ULP_WAKEUP_PERIOD_US (1 /* min */ * 60 /* s */ * 1000 /* ms */ * 1000 /* us */)

@@ -2,6 +2,8 @@
 #include "ulp_lp_core.h"
 #include "ulp_lp_core_utils.h"
 #include "ulp_lp_core_gpio.h"
+#include "ulp_lp_core_memory_shared.h"
+#include "ulp_lp_core_lp_timer_shared.h"
 
 #define LP_PINS
 #include "../pins.h"
@@ -15,44 +17,34 @@
 #define RTC_TIMER_MAIN_BUF0_LOW_REG (RTC_TIMER_BASE + 0x0014)
 #define RTC_TIMER_MAIN_BUF0_HIGH_REG (RTC_TIMER_BASE + 0x0018)
 
-uint64_t ulp_lp_core_rtc_timer_read(void)
-{
-    // If [Internal 90–150 kHz (depending on chip) RC oscillator] is used
-    // The actual RC_SLOW frequency is 136kHz. The time will be measured at 7.352 μs resolution.
-    // <!> The register only contains the number of ticks elasped, not the GMT time.
-    SET_PERI_REG_MASK(RTC_TIMER_UPDATE_REG, BIT(28));
-    uint32_t lo = READ_PERI_REG(RTC_TIMER_MAIN_BUF0_LOW_REG);
-    uint32_t hi = READ_PERI_REG(RTC_TIMER_MAIN_BUF0_HIGH_REG);
-    CLEAR_PERI_REG_MASK(RTC_TIMER_UPDATE_REG, BIT(28));
-    return (((uint64_t)hi & 0xffff) << 32) | lo;
-}
-
 volatile ulp_sample_ringbuf_t sample_ringbuf;
 volatile uint64_t last_lp_core_wakeup_rtc_ticks;
 
-static inline esp_err_t measure_scd41(ulp_sample_t *sample) {
-    esp_err_t ret;
+enum ulp_task {
+    ULP_TRIGGER_MEASUREMENT = 0,
+    ULP_COLLECT_MEASUREMENT,
+};
+volatile enum ulp_task current_task;
 
-    lp_core_i2c_master_set_ack_check_en(LP_I2C_NUM_0, false);
-    ret = scd4x_cmd(LP_I2C_NUM_0, SCD4x_WAKE_UP);
-    lp_core_i2c_master_set_ack_check_en(LP_I2C_NUM_0, true);
-    if (ret != ESP_OK) goto defer;
+#ifdef SOC_LP_TIMER_SUPPORTED
+#define ULP_SET_NEXT_WAKE_UP_TICKS(Ticks) do { \
+    ulp_lp_core_memory_shared_cfg_get()->sleep_duration_ticks = (Ticks); \
+} while (0)
+#else
+#error "LP TIMER is required for sleeping ULP while waiting for sensor measurements. See esp-idf/components/ulp/lp_core/lp_core/lp_core_startup.c"
+#endif
 
-    // TODO: To further reduce the sensor’s power consumption, the sensor may be power cycled between measurements either by cutting/re-
-    //       applying the supply and I2C voltages or by using the power_down/wake_up commands. Note that for power-cycled single shot
-    //       operation, ASC functionality is not available in either case.
-    //       --> Maybe we don't need to disable ASC
-    ret = scd4x_set(LP_I2C_NUM_0, (scd4x_cmd_asc_t) { .asc_enabled = false });
-    if (ret != ESP_OK) goto defer;
+static inline void collect_measurement(void) {
+    ulp_sample_t cur_sample = { 0 };
 
-    ret = scd4x_cmd(LP_I2C_NUM_0, SCD4x_MEASURE_SINGLE_SHOT);
-    if (ret != ESP_OK) goto defer;
+    sht4x_result_t sht4x_res = sht4x_cmd(LP_I2C_NUM_0, SHT4x_MEASURE_HIGH_PRECISION);
+    cur_sample.sht4x_raw_sample = sht4x_raw_measurement(sht4x_res);
 
     scd4x_cmd_read_measurement_t scd4x_res = { 0 };
-    ret = scd4x_get(LP_I2C_NUM_0, &scd4x_res);
-    if (ret != ESP_OK) goto defer;
+    esp_err_t scd4x_err = scd4x_get(LP_I2C_NUM_0, &scd4x_res);
+    scd4x_cmd(LP_I2C_NUM_0, SCD4x_POWER_DOWN);
 
-    sample->co2_ppm = scd4x_res.co2_ppm;
+    cur_sample.co2_ppm = scd4x_res.co2_ppm;
     /*if (sht4x_res.err != ESP_OK) {
         cur_sample.sht4x_raw_sample = (sht4x_raw_sample_t){
             .raw_temperature = scd4x_res.raw_temperature,
@@ -60,9 +52,58 @@ static inline esp_err_t measure_scd41(ulp_sample_t *sample) {
         };
     }*/
 
-defer:
-    scd4x_cmd(LP_I2C_NUM_0, SCD4x_POWER_DOWN);
-    return ret;
+    // Push sample
+    uint64_t rtc_timer_val = ulp_lp_core_lp_timer_get_cycle_count();
+    cur_sample.flags = ulp_sample_flags_from_parts(rtc_timer_val, sht4x_res.err & 0xff, scd4x_err & 0xff);
+    *ringbuf_emplace(&sample_ringbuf) = cur_sample;
+
+    // Wake up main processor
+    ulp_lp_core_wakeup_main_processor();
+
+    // ULP task cycling:
+    // .............[trigger_measurement].......[collect_measurement]
+    //    10min     ^                      5s
+    //              |
+    //              last_lp_core_wakeup_rtc_ticks
+
+    ULP_SET_NEXT_WAKE_UP_TICKS(ulp_lp_core_lp_timer_calculate_sleep_ticks(ULP_WAKEUP_PERIOD_US - SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000));
+
+    current_task = ULP_TRIGGER_MEASUREMENT;
+}
+
+static inline void trigger_measurement(void) {
+    // If [Internal 90–150 kHz (depending on chip) RC oscillator] is used
+    // The actual RC_SLOW frequency is 136kHz. The time will be measured at 7.352 μs resolution.
+    // <!> The register only contains the number of ticks elasped, not the GMT time.
+    last_lp_core_wakeup_rtc_ticks = ulp_lp_core_lp_timer_get_cycle_count();
+
+    esp_err_t ret;
+
+    lp_core_i2c_master_set_ack_check_en(LP_I2C_NUM_0, false);
+    ret = scd4x_cmd(LP_I2C_NUM_0, SCD4x_WAKE_UP);
+    lp_core_i2c_master_set_ack_check_en(LP_I2C_NUM_0, true);
+    if (ret != ESP_OK) goto skip_collect_delay;
+
+    // TODO: To further reduce the sensor’s power consumption, the sensor may be power cycled between measurements either by cutting/re-
+    //       applying the supply and I2C voltages or by using the power_down/wake_up commands. Note that for power-cycled single shot
+    //       operation, ASC functionality is not available in either case.
+    //       --> Maybe we don't need to disable ASC
+    ret = scd4x_set(LP_I2C_NUM_0, (scd4x_cmd_asc_t) { .asc_enabled = false });
+    if (ret != ESP_OK) goto skip_collect_delay;
+
+    ret = scd4x_cmd_(LP_I2C_NUM_0, SCD4x_MEASURE_SINGLE_SHOT, 0 /* no wait */);
+    if (ret != ESP_OK) goto skip_collect_delay;
+
+    // ULP:   ...[trigger_measurement]..................[           collect_measurement           ]
+    // SCD4x: ...[power_on seq]...[  measure_single_shot  ].....................[read_measurement]
+    // SHT4x: .........................................[measure_high_precision].....
+
+    ULP_SET_NEXT_WAKE_UP_TICKS(ulp_lp_core_lp_timer_calculate_sleep_ticks(SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000 - SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US + 50u));
+    current_task = ULP_COLLECT_MEASUREMENT;
+    return;
+
+skip_collect_delay:
+    collect_measurement(); // CO2 measurement is expected to fail with NACK
 }
 
 int main(void)
@@ -73,23 +114,12 @@ int main(void)
     ulp_lp_core_gpio_output_enable(PIN_HB_LED);
     ulp_lp_core_gpio_set_level(PIN_HB_LED, 1);
 
-    // Sample sensors
-    ulp_sample_t cur_sample = { 0 };
+    switch (current_task) {
+        case ULP_TRIGGER_MEASUREMENT: trigger_measurement(); break;
+        case ULP_COLLECT_MEASUREMENT: collect_measurement(); break;
+    }
 
-    esp_err_t scd4x_err = measure_scd41(&cur_sample);
-
-    sht4x_result_t sht4x_res = sht4x_cmd(LP_I2C_NUM_0, SHT4x_MEASURE_HIGH_PRECISION);
-    cur_sample.sht4x_raw_sample = sht4x_raw_measurement(sht4x_res);
-
-    // Push sample
-    uint64_t rtc_timer_val = ulp_lp_core_rtc_timer_read();
-    cur_sample.flags = ulp_sample_flags_from_parts(rtc_timer_val, sht4x_res.err & 0xff, scd4x_err & 0xff);
-    *ringbuf_emplace(&sample_ringbuf) = cur_sample;
-    last_lp_core_wakeup_rtc_ticks = rtc_timer_val;
-
-    // Wake up main processor
     ulp_lp_core_gpio_set_level(PIN_HB_LED, 0);
-    ulp_lp_core_wakeup_main_processor();
 
     return 0; /* ulp_lp_core_halt() is called automatically when main exits */
 }
