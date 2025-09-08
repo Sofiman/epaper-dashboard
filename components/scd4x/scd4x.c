@@ -11,11 +11,15 @@
 #define scd4x_delay_ms(Ms) ulp_lp_core_delay_us((Ms) * 1000)
 #endif
 
+#ifndef SCD4x_I2C_TIMEOUT
+#define SCD4x_I2C_TIMEOUT 5000 // TODO: Unit is different depending SCD4x_LP_CORE_I2C. Clock cycles vs ms
+#endif // !SCD4x_I2C_TIMEOUT
+
 esp_err_t scd4x_cmd_(scd4x_handle_t handle, scd4x_cmd_t cmd, uint16_t cmd_max_duration_ms)
 {
     const uint16_t address_be = __builtin_bswap16(cmd);
     _Static_assert(sizeof(cmd) == sizeof(address_be));
-    esp_err_t ret = scd4x_i2c_write(handle, (const uint8_t*)&address_be, sizeof(address_be), -1);
+    esp_err_t ret = scd4x_i2c_write(handle, (const uint8_t*)&address_be, sizeof(address_be), SCD4x_I2C_TIMEOUT);
 
     if (ret == ESP_OK && cmd_max_duration_ms > 0)
         scd4x_delay_ms(cmd_max_duration_ms);
@@ -45,7 +49,7 @@ esp_err_t scd4x_set_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t va
     };
     sequence.data_crc8 = sensirion_common_calculate_crc8(sequence.data_be);
 
-    esp_err_t ret = scd4x_i2c_write(handle, (const uint8_t*)&sequence, sizeof(sequence), -1);
+    esp_err_t ret = scd4x_i2c_write(handle, (const uint8_t*)&sequence, sizeof(sequence), SCD4x_I2C_TIMEOUT);
 
     if (ret == ESP_OK)
         scd4x_delay_ms(SCD4x_CMD_SET_DURATION_MS);
@@ -63,7 +67,7 @@ esp_err_t scd4x_get_(scd4x_handle_t handle, scd4x_cmd_t cmd, scd4x_cmd_word_t *o
     esp_err_t ret = scd4x_cmd_(handle, cmd, SCD4x_CMD_GET_DURATION_MS);
     if (ret != ESP_OK) return ret;
 
-    ret = scd4x_i2c_read(handle, (uint8_t*)&res, word_count * sizeof(res[0]), -1);
+    ret = scd4x_i2c_read(handle, (uint8_t*)&res, word_count * sizeof(res[0]), SCD4x_I2C_TIMEOUT);
     if (ret != ESP_OK) return ret;
 
     for (int i = 0; i < word_count; i++) {
