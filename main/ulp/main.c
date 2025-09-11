@@ -12,11 +12,6 @@
 #include "ringbuf.h"
 #include "common.h"
 
-#define RTC_TIMER_BASE 0x600B0C00
-#define RTC_TIMER_UPDATE_REG (RTC_TIMER_BASE + 0x0010)
-#define RTC_TIMER_MAIN_BUF0_LOW_REG (RTC_TIMER_BASE + 0x0014)
-#define RTC_TIMER_MAIN_BUF0_HIGH_REG (RTC_TIMER_BASE + 0x0018)
-
 volatile ulp_sample_ringbuf_t sample_ringbuf;
 volatile uint64_t last_lp_core_wakeup_rtc_ticks;
 
