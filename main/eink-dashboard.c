@@ -538,9 +538,10 @@ void load_sensors_data(void) {
     ESP_ERROR_CHECK(scd4x_get(scd41_dev_handle, &measurement));
     ESP_LOGI(TAG, "SCD4x Measurement: \tCO2 %hu ppm\t TEMP %.1f C \t RH %.1f %", measurement.co2_ppm, SCD4x_RAW_TEMPERATURE_TO_CELCIUS(measurement.raw_temperature), SCD4x_RAW_HUMIDITY_TO_RH(measurement.raw_humidity));
 
-    sht4x_result_t sht4x_res = sht4x_cmd(sht41_dev_handle, SHT4x_MEASURE_HIGH_PRECISION);
-    ESP_ERROR_CHECK(sht4x_res.err);
-    sht4x_sample_t sht4x_sample = sht4x_convert(sht4x_raw_measurement(sht4x_res));
+    ESP_ERROR_CHECK(sht4x_cmd(sht41_dev_handle, SHT4x_MEASURE_HIGH_PRECISION));
+    sht4x_result_t sht4x_res;
+    ESP_ERROR_CHECK(sht4x_read(sht41_dev_handle, &sht4x_res));
+    sht4x_sample_t sht4x_sample = sht4x_convert(sht4x_res.sample);
     ESP_LOGI(TAG, "SCD4x Measurement: \t TEMP %.1f C \t RH %.1f %", sht4x_sample.temperature_celcius, sht4x_sample.relative_humidity);
 
     ESP_LOGI(TAG, "Powering down SCD4x...");
@@ -549,7 +550,7 @@ void load_sensors_data(void) {
     *ringbuf_emplace(&local_copy) = (ulp_sample_t) {
         .flags = 0,
         .co2_ppm = measurement.co2_ppm,
-        .sht4x_raw_sample = sht4x_raw_measurement(sht4x_res)
+        .sht4x_raw_sample = sht4x_res.sample
     };
 
     ESP_ERROR_CHECK(i2c_master_bus_rm_device(scd41_dev_handle));

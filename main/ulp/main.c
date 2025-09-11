@@ -36,25 +36,36 @@ volatile enum ulp_task current_task;
 
 static inline void collect_measurement(void) {
     ulp_sample_t cur_sample = { 0 };
-
-    sht4x_result_t sht4x_res = sht4x_cmd(LP_I2C_NUM_0, SHT4x_MEASURE_HIGH_PRECISION);
-    cur_sample.sht4x_raw_sample = sht4x_raw_measurement(sht4x_res);
-
+    esp_err_t sht4x_err;
+    sht4x_result_t sht4x_res;
+    esp_err_t scd4x_err;
     scd4x_cmd_read_measurement_t scd4x_res = { 0 };
-    esp_err_t scd4x_err = scd4x_get(LP_I2C_NUM_0, &scd4x_res);
-    scd4x_cmd(LP_I2C_NUM_0, SCD4x_POWER_DOWN);
 
-    cur_sample.co2_ppm = scd4x_res.co2_ppm;
-    /*if (sht4x_res.err != ESP_OK) {
+    sht4x_err = sht4x_cmd_(LP_I2C_NUM_0, SHT4x_MEASURE_HIGH_PRECISION, 0 /* no wait */);
+
+    { // While waiting for SHT4x
+        scd4x_err = scd4x_get(LP_I2C_NUM_0, &scd4x_res);
+        scd4x_cmd(LP_I2C_NUM_0, SCD4x_POWER_DOWN);
+        cur_sample.co2_ppm = scd4x_res.co2_ppm;
+    }
+
+    if (sht4x_err == ESP_OK) {
+        ulp_lp_core_delay_us(SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US - SCD4x_READ_MEASUREMENT_DURATION_MS * 1000u - SCD4x_POWER_DOWN_DURATION_MS * 1000u + 10u);
+
+        sht4x_err = sht4x_read(LP_I2C_NUM_0, &sht4x_res);
+        cur_sample.sht4x_raw_sample = sht4x_res.sample;
+    }
+
+    if (sht4x_err != ESP_OK && scd4x_err == ESP_OK) {
         cur_sample.sht4x_raw_sample = (sht4x_raw_sample_t){
-            .raw_temperature = scd4x_res.raw_temperature,
-                .raw_humidity = scd4x_res.raw_humidity
+            .raw_temperature = scd4x_res.raw_temperature, // OK: Both have the same convert formula
+            .raw_humidity = scd4x_res.raw_humidity // TODO: Both sensors have different convert formulas
         };
-    }*/
+    }
 
     // Push sample
     uint64_t rtc_timer_val = ulp_lp_core_lp_timer_get_cycle_count();
-    cur_sample.flags = ulp_sample_flags_from_parts(rtc_timer_val, sht4x_res.err & 0xff, scd4x_err & 0xff);
+    cur_sample.flags = ulp_sample_flags_from_parts(rtc_timer_val, sht4x_err & 0xff, scd4x_err & 0xff);
     *ringbuf_emplace(&sample_ringbuf) = cur_sample;
 
     // Wake up main processor
@@ -94,11 +105,11 @@ static inline void trigger_measurement(void) {
     ret = scd4x_cmd_(LP_I2C_NUM_0, SCD4x_MEASURE_SINGLE_SHOT, 0 /* no wait */);
     if (ret != ESP_OK) goto skip_collect_delay;
 
-    // ULP:   ...[trigger_measurement]..................[           collect_measurement           ]
-    // SCD4x: ...[power_on seq]...[  measure_single_shot  ].....................[read_measurement]
-    // SHT4x: .........................................[measure_high_precision].....
+    // ULP:   ...[trigger_measurement]....................[           collect_measurement            ]
+    // SCD4x: ...[power_on seq]...[  measure_single_shot ]..[read_measurement][power_down]............
+    // SHT4x: ............................................[        measure_high_precision         ]...
 
-    ULP_SET_NEXT_WAKE_UP_TICKS(ulp_lp_core_lp_timer_calculate_sleep_ticks(SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000 - SHT4x_MEASURE_HIGH_PRECISION_MAX_DURATION_US + 50u));
+    ULP_SET_NEXT_WAKE_UP_TICKS(ulp_lp_core_lp_timer_calculate_sleep_ticks(SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000 + 10u));
     current_task = ULP_COLLECT_MEASUREMENT;
     return;
 

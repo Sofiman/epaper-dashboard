@@ -86,24 +86,24 @@ static inline sht4x_sample_t sht4x_convert(sht4x_raw_sample_t in) {
     return sample;
 }
 
-typedef struct {
-    esp_err_t err;
-    sensirion_word_t frames[2];
+typedef union {
+    struct {
+        uint16_t _word0;
+        uint16_t _word1;
+    };
+
+    sht4x_raw_sample_t sample;
+    struct {
+        uint16_t sn_high;
+        uint16_t sn_low;
+    };
 } sht4x_result_t;
 
 #define sht4x_cmd(Handle, Cmd) sht4x_cmd_((Handle), (Cmd), (Cmd ## _MAX_DURATION_US))
-sht4x_result_t sht4x_cmd_(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_max_duration_us);
-
-static inline sht4x_raw_sample_t sht4x_raw_measurement(sht4x_result_t result) {
-    sht4x_raw_sample_t measurement;
-    measurement.raw_temperature = ((uint16_t)result.frames[0].data[0] << 8) | ((uint16_t)result.frames[0].data[1]);
-    measurement.raw_humidity    = ((uint16_t)result.frames[1].data[0] << 8) | ((uint16_t)result.frames[1].data[1]);
-    return measurement;
-}
+esp_err_t sht4x_cmd_(sht4x_handle_t handle, sht4x_cmd_t cmd, uint16_t cmd_max_duration_us);
+esp_err_t sht4x_read(sht4x_handle_t handle, sht4x_result_t *res);
 
 static inline uint32_t sht4x_serial_number(sht4x_result_t result) {
-    return ((uint32_t)result.frames[0].data[0]) << 24
-        | ((uint32_t)result.frames[0].data[1])  << 16
-        | ((uint32_t)result.frames[1].data[0])  <<  8
-        | ((uint32_t)result.frames[1].data[1])  <<  0;
+    return ((uint32_t)result.sn_high)  << 16
+        | ((uint32_t)result.sn_low)  <<  0;
 }
