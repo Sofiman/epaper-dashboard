@@ -33,6 +33,7 @@
 #include "gui.h"
 #include "sht4x.h"
 #include "scd4x.h"
+#include "ld2410s.h"
 #include "pins.h"
 
 static const char *TAG = "main";
@@ -292,6 +293,35 @@ void init_devices() {
     i2c_dev_conf = sht4x_i2c_config(SHT4x_I2C_FAST_MODE);
     ret = i2c_master_bus_add_device(i2c_bus_handle, &i2c_dev_conf, &sht41_dev_handle);
     ESP_ERROR_CHECK(ret);
+}
+
+static ld2410s_t ld2410s_dev;
+
+void config_ld2410s(void) {
+    ESP_ERROR_CHECK(ld2410s_init(UART_NUM_1, &ld2410s_dev, GPIO_NUM_4, GPIO_NUM_5));
+
+    ld2410s_cfg_t cfg = ld2410s_cfg_begin(ld2410s_dev);
+    assert(cfg != NULL);
+
+    //ESP_ERROR_CHECK(ld2410s_cfg_set_reporting_mode(cfg, LD2410S_MINIMAL_REPORTING));
+
+    const ld2410s_param_t params[] = {
+        { .word = LD2410S_P_STATUS_REPORT_FREQ, .value = 10 /* 0.5Hz */ },
+        { .word = LD2410S_P_DISTANCE_REPORT_FREQ, .value = 10 /* 0.5Hz */ },
+        { .word = LD2410S_P_UNMANNED_DELAY_TIME, .value = 10 /* 10 s */ },
+        { .word = LD2410S_P_RESPONSE_SPEED, .value = LD2410S_RESPONSE_NORMAL }
+    };
+    ESP_ERROR_CHECK(ld2410s_cfg_write_params(cfg, LD2410S_WRITE_GENERIC_PARAMS, params, sizeof(params)));
+
+    ESP_ERROR_CHECK(ld2410s_cfg_end(cfg));
+
+    ld2410s_minimal_report_t report;
+    for (;;) {
+        while (ld2410s_poll_minimal_report(ld2410s_dev, &report) == ESP_OK) {
+            ESP_LOGI(TAG, "Radar report: \tstate = %hhu (%s)\tdistance = %hu", report.target_state, report.target_state >= LD2410S_OCCUPIED ? "OCCUPIED" : "unoccupied", report.target_distance_cm);
+        }
+        vTaskDelay(100);
+    }
 }
 
 static RTC_DATA_ATTR struct Forecast g_forecast;
@@ -608,6 +638,7 @@ void app_main(void)
             gui_tick(&bitui_handle);
         } break;
     default:
+        config_ld2410s();
         load_sensors_data();
         gui_data.samples = &local_copy;
         start_ulp_program();
