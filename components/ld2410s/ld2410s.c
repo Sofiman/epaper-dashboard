@@ -3,7 +3,6 @@
 #include "driver/uart.h"
 
 #include <string.h>
-#include "esp_log.h"
 
 enum : uint32_t {
     FRAME_BEGIN = 0xFAFBFCFD,
@@ -61,7 +60,6 @@ static esp_err_t ld2410s_recv_frame_(ld2410s_t handle, struct ld2410s_frame_head
     uint32_t received_frame_begin = 0;
     if (uart_read_bytes(handle->uart, &received_frame_begin, sizeof(received_frame_begin), 120 * portTICK_PERIOD_MS) == -1)
         return ESP_ERR_INVALID_RESPONSE;
-    ESP_LOGE("ld2410s", "received_frame_begin=0x%04x", received_frame_begin);
     if (received_frame_begin != FRAME_BEGIN) {
         return ESP_ERR_INVALID_RESPONSE;
     }
@@ -69,8 +67,6 @@ static esp_err_t ld2410s_recv_frame_(ld2410s_t handle, struct ld2410s_frame_head
     struct ld2410s_frame_header received_header;
     if (uart_read_bytes(handle->uart, &received_header, sizeof(received_header), sizeof(received_header) * portTICK_PERIOD_MS) == -1)
         return ESP_ERR_INVALID_RESPONSE;
-    ESP_LOGE("ld2410s", "received_header = { .cmd_len = %u, .cmd_word = 0x%04x }", received_header.cmd_len, received_header.cmd_word);
-    ESP_LOGE("ld2410s", "expected_header = { .cmd_len = %u, .cmd_word = 0x%04x }", header.cmd_len, header.cmd_word);
     if (received_header.cmd_len != header.cmd_len || received_header.cmd_word != header.cmd_word)
         return ESP_ERR_INVALID_RESPONSE;
 
@@ -80,7 +76,6 @@ static esp_err_t ld2410s_recv_frame_(ld2410s_t handle, struct ld2410s_frame_head
     uint32_t received_frame_end;
     if (uart_read_bytes(handle->uart, &received_frame_end, sizeof(received_frame_end), 2 * portTICK_PERIOD_MS) == -1)
         return ESP_ERR_INVALID_RESPONSE;
-    ESP_LOGE("ld2410s", "received_frame_end=0x%04x", received_frame_end);
     if (received_frame_end != FRAME_END)
         return ESP_ERR_INVALID_RESPONSE;
 

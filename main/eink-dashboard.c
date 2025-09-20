@@ -303,18 +303,20 @@ void config_ld2410s(void) {
     ld2410s_cfg_t cfg = ld2410s_cfg_begin(ld2410s_dev);
     assert(cfg != NULL);
 
+    // Default reporting mode after power up is LD2410S_MINIMAL_REPORTING
     //ESP_ERROR_CHECK(ld2410s_cfg_set_reporting_mode(cfg, LD2410S_MINIMAL_REPORTING));
 
     const ld2410s_param_t params[] = {
-        { .word = LD2410S_P_STATUS_REPORT_FREQ, .value = 10 /* 0.5Hz */ },
-        { .word = LD2410S_P_DISTANCE_REPORT_FREQ, .value = 10 /* 0.5Hz */ },
-        { .word = LD2410S_P_UNMANNED_DELAY_TIME, .value = 10 /* 10 s */ },
+        { .word = LD2410S_P_STATUS_REPORT_FREQ, .value = 5 /* 0.5Hz */ },
+        { .word = LD2410S_P_DISTANCE_REPORT_FREQ, .value = 5 /* 0.5Hz */ },
+        { .word = LD2410S_P_UNMANNED_DELAY_TIME, .value = 30 /* 30 s */ },
         { .word = LD2410S_P_RESPONSE_SPEED, .value = LD2410S_RESPONSE_NORMAL }
     };
     ESP_ERROR_CHECK(ld2410s_cfg_write_params(cfg, LD2410S_WRITE_GENERIC_PARAMS, params, sizeof(params)));
 
     ESP_ERROR_CHECK(ld2410s_cfg_end(cfg));
 
+    /*
     ld2410s_minimal_report_t report;
     for (;;) {
         while (ld2410s_poll_minimal_report(ld2410s_dev, &report) == ESP_OK) {
@@ -322,6 +324,7 @@ void config_ld2410s(void) {
         }
         vTaskDelay(100);
     }
+    */
 }
 
 static RTC_DATA_ATTR struct Forecast g_forecast;
