@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "driver/i2c_master.h"
+#include "driver/rtc_io.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -299,7 +300,7 @@ void init_devices() {
 static ld2410s_t ld2410s_dev;
 
 void config_ld2410s(void) {
-    ESP_ERROR_CHECK(ld2410s_init(UART_NUM_1, &ld2410s_dev, GPIO_NUM_4, GPIO_NUM_5));
+    ESP_ERROR_CHECK(ld2410s_init(UART_NUM_1, &ld2410s_dev, PIN_LD2410S_TX, PIN_LD2410S_RX));
 
     ld2410s_cfg_t cfg = ld2410s_cfg_begin(ld2410s_dev);
     assert(cfg != NULL);
@@ -310,7 +311,7 @@ void config_ld2410s(void) {
     const ld2410s_param_t params[] = {
         { .word = LD2410S_P_STATUS_REPORT_FREQ, .value = 5 /* 0.5Hz */ },
         { .word = LD2410S_P_DISTANCE_REPORT_FREQ, .value = 5 /* 0.5Hz */ },
-        { .word = LD2410S_P_UNMANNED_DELAY_TIME, .value = 30 /* 30 s */ },
+        { .word = LD2410S_P_UNMANNED_DELAY_TIME, .value = 30 /* s */ },
         { .word = LD2410S_P_RESPONSE_SPEED, .value = LD2410S_RESPONSE_NORMAL }
     };
     ESP_ERROR_CHECK(ld2410s_cfg_write_params(cfg, LD2410S_WRITE_GENERIC_PARAMS, params, sizeof(params)));
@@ -602,15 +603,35 @@ void start_ulp_program() {
     assert(i2c_cfg.i2c_pin_cfg.scl_io_num == PIN_LP_I2C_SCL);
     ESP_ERROR_CHECK(lp_core_i2c_master_init(LP_I2C_NUM_0, &i2c_cfg));
 
-    const uint64_t ticks_per_us = ulp_lp_core_lp_timer_calculate_sleep_ticks(1 /* us */);
+    ESP_LOGI(TAG, "Initializing RTC IO...");
+    {
+        rtc_gpio_init(PIN_HB_LED);
+        rtc_gpio_set_direction(PIN_HB_LED, RTC_GPIO_MODE_OUTPUT_OD);
+        rtc_gpio_pulldown_dis(PIN_HB_LED);
+        rtc_gpio_pullup_en(PIN_HB_LED);
+    }
+
+    {
+        rtc_gpio_init(PIN_LD2410S_OCCUPIED);
+        rtc_gpio_set_direction(PIN_LD2410S_OCCUPIED, RTC_GPIO_MODE_INPUT_ONLY);
+        rtc_gpio_pulldown_dis(PIN_LD2410S_OCCUPIED);
+        rtc_gpio_pullup_en(PIN_LD2410S_OCCUPIED);
+        rtc_gpio_wakeup_enable(PIN_LD2410S_OCCUPIED, GPIO_INTR_POSEDGE);
+    }
+
+    /*
+    const uint64_t ticks_per_us = ulp_lp_core_lp_timer_calculate_sleep_ticks(1 * us *);
     _Static_assert(sizeof(ulp_calibrated_ticks_per_us) == sizeof(ticks_per_us));
     memcpy(&ulp_calibrated_ticks_per_us, &ticks_per_us, sizeof(ulp_calibrated_ticks_per_us));
+    */
 
     ESP_LOGI(TAG, "Loading ULP binary...");
     ESP_ERROR_CHECK(ulp_lp_core_load_binary(bin_start, (bin_end - bin_start)));
 
     ulp_lp_core_cfg_t cfg = {
-        .wakeup_source = ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER,
+        .wakeup_source =
+            ULP_LP_CORE_WAKEUP_SOURCE_LP_IO /* wakup via PIN_LD2410S_OCCUPIED */
+            | ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER,
         .lp_timer_sleep_duration_us = ULP_WAKEUP_PERIOD_US,
     };
 

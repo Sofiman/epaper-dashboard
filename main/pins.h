@@ -9,7 +9,7 @@
 #include "ulp_lp_core_gpio.h"
 #define LP_PIN(X, Name) PIN_GUARD(X); static const lp_io_num_t Name = LP_IO_NUM_ ## X
 #else
-#define LP_PIN(X, Name) PIN_GUARD(X)
+#define LP_PIN(X, Name) PIN(X, Name)
 #endif
 
 // ESP32C6 strapping pins as shown in Table 2-5 in the chip's datasheet

@@ -75,7 +75,9 @@ static inline void collect_measurement(void) {
     *ringbuf_emplace(&sample_ringbuf) = cur_sample;
 
     // Wake up main processor
-    ulp_lp_core_wakeup_main_processor();
+    if (ulp_lp_core_gpio_get_level(PIN_LD2410S_OCCUPIED)) {
+        ulp_lp_core_wakeup_main_processor();
+    }
 
     // ULP task cycling:
     // .............[trigger_measurement].......[collect_measurement]
@@ -126,17 +128,22 @@ skip_collect_delay:
 int main(void)
 {
     // Power up
-    ulp_lp_core_gpio_init(PIN_HB_LED);
-    ulp_lp_core_gpio_set_output_mode(PIN_HB_LED, RTCIO_LL_OUTPUT_NORMAL);
     ulp_lp_core_gpio_output_enable(PIN_HB_LED);
     ulp_lp_core_gpio_set_level(PIN_HB_LED, 1);
 
-    switch (current_task) {
-        case ULP_TRIGGER_MEASUREMENT: trigger_measurement(); break;
-        case ULP_COLLECT_MEASUREMENT: collect_measurement(); break;
+    if (ulp_lp_core_get_wakeup_cause() & ULP_LP_CORE_WAKEUP_SOURCE_LP_IO) {
+        ulp_lp_core_wakeup_main_processor();
+    }
+
+    if (ulp_lp_core_get_wakeup_cause() & ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER) {
+        switch (current_task) {
+            case ULP_TRIGGER_MEASUREMENT: trigger_measurement(); break;
+            case ULP_COLLECT_MEASUREMENT: collect_measurement(); break;
+        }
     }
 
     ulp_lp_core_gpio_set_level(PIN_HB_LED, 0);
+    ulp_lp_core_gpio_output_disable(PIN_HB_LED);
 
     return 0; /* ulp_lp_core_halt() is called automatically when main exits */
 }
