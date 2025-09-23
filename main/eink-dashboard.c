@@ -23,6 +23,7 @@
 
 #include "ulp_lp_core.h"
 #include "lp_core_i2c.h"
+#include "ulp_lp_core_lp_timer_shared.h"
 #include "ulp_eink_dashboard.h"
 
 #include "immjson.h"
@@ -601,8 +602,12 @@ void start_ulp_program() {
     assert(i2c_cfg.i2c_pin_cfg.scl_io_num == PIN_LP_I2C_SCL);
     ESP_ERROR_CHECK(lp_core_i2c_master_init(LP_I2C_NUM_0, &i2c_cfg));
 
-    ESP_ERROR_CHECK(ulp_lp_core_load_binary(bin_start,
-        (bin_end - bin_start)));
+    const uint64_t ticks_per_us = ulp_lp_core_lp_timer_calculate_sleep_ticks(1 /* us */);
+    _Static_assert(sizeof(ulp_calibrated_ticks_per_us) == sizeof(ticks_per_us));
+    memcpy(&ulp_calibrated_ticks_per_us, &ticks_per_us, sizeof(ulp_calibrated_ticks_per_us));
+
+    ESP_LOGI(TAG, "Loading ULP binary...");
+    ESP_ERROR_CHECK(ulp_lp_core_load_binary(bin_start, (bin_end - bin_start)));
 
     ulp_lp_core_cfg_t cfg = {
         .wakeup_source = ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER,
