@@ -9,6 +9,11 @@ enum : uint32_t {
     FRAME_END = 0x01020304
 };
 
+enum : uint8_t {
+    MINIMAL_REPORT_FRAME_BEGIN = 0x6E,
+    MINIMAL_REPORT_FRAME_END = 0x62
+};
+
 struct ld2410s_handle {
     uart_port_t uart;
 };
@@ -230,7 +235,7 @@ esp_err_t ld2410s_poll_minimal_report(ld2410s_t handle, ld2410s_minimal_report_t
     uint8_t frame_head;
     if (uart_read_bytes(handle->uart, &frame_head, sizeof(frame_head), 1 * portTICK_PERIOD_MS) == -1)
         return ESP_ERR_INVALID_RESPONSE;
-    if (frame_head != 0x6E)
+    if (frame_head != MINIMAL_REPORT_FRAME_BEGIN)
         return ESP_ERR_INVALID_RESPONSE;
 
     if (uart_read_bytes(handle->uart, report, sizeof(*report), 1 * portTICK_PERIOD_MS) == -1)
@@ -239,7 +244,7 @@ esp_err_t ld2410s_poll_minimal_report(ld2410s_t handle, ld2410s_minimal_report_t
     uint8_t frame_end;
     if (uart_read_bytes(handle->uart, &frame_end, sizeof(frame_end), 1 * portTICK_PERIOD_MS) == -1)
         return ESP_ERR_INVALID_RESPONSE;
-    if (frame_end != 0x62)
+    if (frame_end != MINIMAL_REPORT_FRAME_END)
         return ESP_ERR_INVALID_RESPONSE;
 
 
