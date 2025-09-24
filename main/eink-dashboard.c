@@ -303,10 +303,12 @@ void config_ld2410s(void) {
     ESP_ERROR_CHECK(ld2410s_init(UART_NUM_1, &ld2410s_dev, PIN_LD2410S_TX, PIN_LD2410S_RX));
 
     ld2410s_cfg_t cfg = ld2410s_cfg_begin(ld2410s_dev);
-    assert(cfg != NULL);
+    if (cfg == NULL)
+        return; /* We can't enter config mode, stop now */
 
+    esp_err_t err;
     // Default reporting mode after power up is LD2410S_MINIMAL_REPORTING
-    //ESP_ERROR_CHECK(ld2410s_cfg_set_reporting_mode(cfg, LD2410S_MINIMAL_REPORTING));
+    //err = ld2410s_cfg_set_reporting_mode(cfg, LD2410S_MINIMAL_REPORTING);
 
     const ld2410s_param_t params[] = {
         { .word = LD2410S_P_STATUS_REPORT_FREQ, .value = 5 /* 0.5Hz */ },
@@ -314,19 +316,15 @@ void config_ld2410s(void) {
         { .word = LD2410S_P_UNMANNED_DELAY_TIME, .value = 30 /* s */ },
         { .word = LD2410S_P_RESPONSE_SPEED, .value = LD2410S_RESPONSE_NORMAL }
     };
-    ESP_ERROR_CHECK(ld2410s_cfg_write_params(cfg, LD2410S_WRITE_GENERIC_PARAMS, params, sizeof(params)));
 
-    ESP_ERROR_CHECK(ld2410s_cfg_end(cfg));
-
-    /*
-    ld2410s_minimal_report_t report;
-    for (;;) {
-        while (ld2410s_poll_minimal_report(ld2410s_dev, &report) == ESP_OK) {
-            ESP_LOGI(TAG, "Radar report: \tstate = %hhu (%s)\tdistance = %hu", report.target_state, report.target_state >= LD2410S_OCCUPIED ? "OCCUPIED" : "unoccupied", report.target_distance_cm);
-        }
-        vTaskDelay(100);
+    enum { RETRIES = 3 };
+    for (int i = 0; i < RETRIES; i++) {
+        err = ld2410s_cfg_write_params(cfg, LD2410S_WRITE_GENERIC_PARAMS, params, sizeof(params));
+        if (err == ESP_OK) break;
+        ESP_LOGE(TAG, "Failed to update LD2410s config params: %s. Retries remaining: %d\n", esp_err_to_name(err), RETRIES-i);
     }
-    */
+
+    ld2410s_cfg_end(cfg);
 }
 
 static RTC_DATA_ATTR struct Forecast g_forecast;
@@ -667,11 +665,11 @@ void app_main(void)
             gui_tick(&bitui_handle);
         } break;
     default:
-        config_ld2410s();
         load_sensors_data();
         gui_data.samples = &local_copy;
         start_ulp_program();
         load_weather_data();
+        config_ld2410s(); // LD2410s should have be initialized by now
         break;
     }
 
