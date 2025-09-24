@@ -594,19 +594,14 @@ void load_sensors_data(void) {
 extern const uint8_t bin_start[] asm("_binary_ulp_eink_dashboard_bin_start");
 extern const uint8_t bin_end[]   asm("_binary_ulp_eink_dashboard_bin_end");
 
-void start_ulp_program() {
-    ESP_LOGI(TAG, "Initializing LP I2C...");
-    const lp_core_i2c_cfg_t i2c_cfg = LP_CORE_I2C_DEFAULT_CONFIG(); // speed: 400Khz
-    assert(i2c_cfg.i2c_pin_cfg.sda_io_num == PIN_LP_I2C_SDA);
-    assert(i2c_cfg.i2c_pin_cfg.scl_io_num == PIN_LP_I2C_SCL);
-    ESP_ERROR_CHECK(lp_core_i2c_master_init(LP_I2C_NUM_0, &i2c_cfg));
-
+void init_rtc_io() {
     ESP_LOGI(TAG, "Initializing RTC IO...");
     {
         rtc_gpio_init(PIN_HB_LED);
         rtc_gpio_set_direction(PIN_HB_LED, RTC_GPIO_MODE_OUTPUT_OD);
         rtc_gpio_pulldown_dis(PIN_HB_LED);
         rtc_gpio_pullup_en(PIN_HB_LED);
+        rtc_gpio_set_level(PIN_HB_LED, 0);
     }
 
     {
@@ -616,6 +611,14 @@ void start_ulp_program() {
         rtc_gpio_pullup_en(PIN_LD2410S_OCCUPIED);
         rtc_gpio_wakeup_enable(PIN_LD2410S_OCCUPIED, GPIO_INTR_POSEDGE);
     }
+}
+
+void start_ulp_program() {
+    ESP_LOGI(TAG, "Initializing LP I2C...");
+    const lp_core_i2c_cfg_t i2c_cfg = LP_CORE_I2C_DEFAULT_CONFIG(); // speed: 400Khz
+    assert(i2c_cfg.i2c_pin_cfg.sda_io_num == PIN_LP_I2C_SDA);
+    assert(i2c_cfg.i2c_pin_cfg.scl_io_num == PIN_LP_I2C_SCL);
+    ESP_ERROR_CHECK(lp_core_i2c_master_init(LP_I2C_NUM_0, &i2c_cfg));
 
     ESP_LOGI(TAG, "Loading ULP binary...");
     ESP_ERROR_CHECK(ulp_lp_core_load_binary(bin_start, (bin_end - bin_start)));
@@ -641,6 +644,7 @@ void app_main(void)
     gui_data.forecast = &g_forecast;
 
     init_devices();
+    init_rtc_io();
 
     setenv("TZ", TZ_EUROPE_PARIS, 1);
     tzset();
