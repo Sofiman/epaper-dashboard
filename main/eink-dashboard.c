@@ -617,12 +617,6 @@ void start_ulp_program() {
         rtc_gpio_wakeup_enable(PIN_LD2410S_OCCUPIED, GPIO_INTR_POSEDGE);
     }
 
-    /*
-    const uint64_t ticks_per_us = ulp_lp_core_lp_timer_calculate_sleep_ticks(1 * us *);
-    _Static_assert(sizeof(ulp_calibrated_ticks_per_us) == sizeof(ticks_per_us));
-    memcpy(&ulp_calibrated_ticks_per_us, &ticks_per_us, sizeof(ulp_calibrated_ticks_per_us));
-    */
-
     ESP_LOGI(TAG, "Loading ULP binary...");
     ESP_ERROR_CHECK(ulp_lp_core_load_binary(bin_start, (bin_end - bin_start)));
 
@@ -635,6 +629,10 @@ void start_ulp_program() {
 
     ESP_ERROR_CHECK(ulp_lp_core_run(&cfg));
     ESP_LOGI(TAG, "ULP LP Core program start schedueld every 1min.");
+
+    const uint64_t ticks_per_us = ulp_lp_core_lp_timer_calculate_sleep_ticks((1ull << 33));
+    _Static_assert(sizeof(ulp_calibrated_ticks_per_us) == sizeof(ticks_per_us));
+    memcpy(&ulp_calibrated_ticks_per_us, &ticks_per_us, sizeof(ulp_calibrated_ticks_per_us));
 }
 
 void app_main(void)

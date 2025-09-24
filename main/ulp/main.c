@@ -24,7 +24,14 @@ volatile uint64_t last_lp_core_wakeup_rtc_ticks;
 // This value MUST be set to `ulp_lp_core_lp_timer_calculate_sleep_ticks(1)`
 // before starting the ULP core on the main CPU startup after power-up
 // or brownout.
+//
+// Value is in fixed point Q33.31
 volatile uint64_t calibrated_ticks_per_us;
+
+static uint64_t calculate_sleep_ticks(uint64_t sleep_duration_us)
+{
+    return ((sleep_duration_us * calibrated_ticks_per_us) >> 33);
+}
 
 enum ulp_task {
     ULP_TRIGGER_MEASUREMENT = 0,
@@ -85,7 +92,7 @@ static inline void collect_measurement(void) {
     //              |
     //              last_lp_core_wakeup_rtc_ticks
 
-    ULP_SET_NEXT_WAKE_UP_TICKS(calibrated_ticks_per_us * (ULP_WAKEUP_PERIOD_US - SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000));
+    ULP_SET_NEXT_WAKE_UP_TICKS(calculate_sleep_ticks(ULP_WAKEUP_PERIOD_US - SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000));
 
     current_task = ULP_TRIGGER_MEASUREMENT;
 }
@@ -117,7 +124,7 @@ static inline void trigger_measurement(void) {
     // SCD4x: ...[power_on seq]...[  measure_single_shot ]..[read_measurement][power_down]............
     // SHT4x: ............................................[        measure_high_precision         ]...
 
-    ULP_SET_NEXT_WAKE_UP_TICKS(calibrated_ticks_per_us * (SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000 + 10u));
+    ULP_SET_NEXT_WAKE_UP_TICKS(calculate_sleep_ticks(SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000 + 10u));
     current_task = ULP_COLLECT_MEASUREMENT;
     return;
 
