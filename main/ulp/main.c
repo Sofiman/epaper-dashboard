@@ -4,6 +4,7 @@
 #include "ulp_lp_core_gpio.h"
 #include "ulp_lp_core_memory_shared.h"
 #include "ulp_lp_core_lp_timer_shared.h"
+#include "hal/lp_core_ll.h"
 
 #define LP_PINS
 #include "../pins.h"
@@ -95,6 +96,7 @@ static inline void collect_measurement(void) {
     ULP_SET_NEXT_WAKE_UP_TICKS(calculate_sleep_ticks(ULP_WAKEUP_PERIOD_US - SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000));
 
     current_task = ULP_TRIGGER_MEASUREMENT;
+    lp_core_ll_set_wakeup_source(LP_CORE_LL_WAKEUP_SOURCE_LP_TIMER | LP_CORE_LL_WAKEUP_SOURCE_LP_IO);
 }
 
 static inline void trigger_measurement(void) {
@@ -125,7 +127,13 @@ static inline void trigger_measurement(void) {
     // SHT4x: ............................................[        measure_high_precision         ]...
 
     ULP_SET_NEXT_WAKE_UP_TICKS(calculate_sleep_ticks(SCD4x_MEASURE_SINGLE_SHOT_DURATION_MS * 1000 + 10u));
+
     current_task = ULP_COLLECT_MEASUREMENT;
+    // The OCCUPIED pin value is irrelevant during measurement as the collect_measurement function
+    // will, any case, wakeup the HP core if OCCUPIED is high. However, receiving the IO interrupt
+    // during the short sleep (while waiting for the SCD4x sensor) can wakeup the main HP
+    // prematurely, before the new sample is pushed to the ring buffer.
+    lp_core_ll_set_wakeup_source(LP_CORE_LL_WAKEUP_SOURCE_LP_TIMER);
     return;
 
 skip_collect_delay:
@@ -134,23 +142,21 @@ skip_collect_delay:
 
 int main(void)
 {
-    // Power up
-    ulp_lp_core_gpio_output_enable(PIN_HB_LED);
     ulp_lp_core_gpio_set_level(PIN_HB_LED, 1);
 
-    if (ulp_lp_core_get_wakeup_cause() & ULP_LP_CORE_WAKEUP_SOURCE_LP_IO) {
-        ulp_lp_core_wakeup_main_processor();
-    }
-
-    if (ulp_lp_core_get_wakeup_cause() & ULP_LP_CORE_WAKEUP_SOURCE_LP_TIMER) {
+    if (ulp_lp_core_get_wakeup_cause() & LP_CORE_LL_WAKEUP_SOURCE_LP_TIMER) {
         switch (current_task) {
             case ULP_TRIGGER_MEASUREMENT: trigger_measurement(); break;
             case ULP_COLLECT_MEASUREMENT: collect_measurement(); break;
         }
+
+        ulp_lp_core_gpio_set_level(PIN_HB_LED, 0);
+    } else  {
+        ulp_lp_core_wakeup_main_processor();
+
+        ulp_lp_core_gpio_set_level(PIN_HB_LED, 0);
+        ulp_lp_core_halt(); /* do not reschedule timer alarm, stop now */
     }
 
-    ulp_lp_core_gpio_set_level(PIN_HB_LED, 0);
-    ulp_lp_core_gpio_output_disable(PIN_HB_LED);
-
-    return 0; /* ulp_lp_core_halt() is called automatically when main exits */
+    return 0; /* alarm rescheduled and ulp_lp_core_halt() when main exits */
 }
