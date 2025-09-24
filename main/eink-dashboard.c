@@ -667,11 +667,12 @@ void app_main(void)
             gui_tick(&bitui_handle);
         } break;
     default:
+        ulp_lp_core_stop();
         load_sensors_data();
         gui_data.samples = &local_copy;
-        start_ulp_program();
         load_weather_data();
         config_ld2410s(); // LD2410s should have be initialized by now
+        start_ulp_program();
         break;
     }
 
