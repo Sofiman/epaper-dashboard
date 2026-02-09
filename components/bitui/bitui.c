@@ -146,18 +146,51 @@ void bitui_hline_fast(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
    bitui_colorize32(ctx, end, x2_rem);
 }
 
-void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2)
-{
+void bitui_vline_fast(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2) {
     if (y1 > y2) SWAP_U16(y1, y2);
 
-    bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = x, .y = y1, .w = 1, .h = y2-y1 });
+    const uint32_t s = ctx->stride;
+    const uint32_t col = x / 8;
+    const uint32_t mask = 0x80 >> (x & 7);
 
-    const uint8_t col = x / 8;
-    const uint8_t mask = 0x80 >> (x & 7);
-    const uint16_t s = ctx->stride;
+    uint8_t *pix = &ctx->framebuffer[y1 * s + col];
+    uint8_t * const end = &ctx->framebuffer[y2 * s + col];
 
-    for (; y1 <= y2; ++y1) {
-        bitui_colorize(ctx, y1 * s + col, mask);
+    // This function is memory bound because of the column memory access pattern required for this
+    // operation. After profiling with ESP32C6 performance counters, there is 115440 load hazards.
+    // However, by manually unrolling the loop in blocks of 4 to use the CPU superscalar
+    // capabilities, we reduce the benchmark best case scenario time from 4513us us to 3484us (-22%)
+    // but inrecase the code size y ~230 bytes. Furthermore, only 1200 load hazards occur and the
+    // number of idle cycles increased from 2884 to 4320.
+    //
+    // Further unrolling the loop in blocks of 8 lead to equal performance but bigger code size
+    // (+406 bytes), it is not worth it.
+    if (ctx->color) {
+#ifndef BITUI_NO_UNROLL_LOOPS
+       for (uint32_t blocks = (y2 - y1) / 4; blocks-- > 0; ) {
+           *pix = *pix | mask; pix += s;
+           *pix = *pix | mask; pix += s;
+           *pix = *pix | mask; pix += s;
+           *pix = *pix | mask; pix += s;
+       }
+#endif
+
+       for (; pix <= end; pix += s) {
+           *pix = *pix | mask;
+       }
+    } else {
+#ifndef BITUI_NO_UNROLL_LOOPS
+       for (uint32_t blocks = (y2 - y1) / 4; blocks-- > 0; ) {
+           *pix = *pix & ~mask; pix += s;
+           *pix = *pix & ~mask; pix += s;
+           *pix = *pix & ~mask; pix += s;
+           *pix = *pix & ~mask; pix += s;
+       }
+#endif
+
+       for (; pix <= end; pix += s) {
+           *pix = *pix & ~mask;
+       }
     }
 }
 #else
@@ -208,7 +241,7 @@ void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
     bitui_rotate(ctx, &x1, &y1);
     bitui_rotate(ctx, &x2, &y2);
 
-    if (x1 == x2) bitui_vline(ctx, x1, y1, y2);
+    if (x1 == x2) bitui_vline_fast(ctx, x1, y1, y2);
     else if (y1 == y2) bitui_hline_fast(ctx, y1, x1, x2);
     else assert(0 && "Unsupported non axis aligned lines");
 }
