@@ -1,6 +1,7 @@
 #include "bitui.h"
 #include <assert.h>
 #include <string.h>
+#include <limits.h>
 
 #define SWAP_U16(A,B) do { \
     uint16_t __tmp = (A); \
@@ -46,6 +47,12 @@ static inline void bitui_colorize(bitui_t ctx, uint16_t offset, uint8_t updated_
     uint8_t temp = ctx->framebuffer[offset] & ~updated_pixels_mask;
     if (ctx->color) temp |= updated_pixels_mask;
     ctx->framebuffer[offset] = temp;
+}
+
+static inline void bitui_colorize32(bitui_t ctx, uint32_t *pix, uint32_t updated_pixels_mask) {
+    uint32_t temp = *pix & ~updated_pixels_mask;
+    if (ctx->color) temp |= updated_pixels_mask;
+    *pix = temp;
 }
 
 #ifdef BITUI_ROTATION
@@ -96,48 +103,47 @@ void bitui_point(bitui_t ctx, uint16_t x, uint16_t y) {
 }
 
 #ifndef BITUI_SWAP_XY
-void bitui_hline(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
+static inline uint32_t bswapped_srl(uint32_t k) {
+    // Computes bswap32(0xffffffff >> (k % 32)) with the minimum number of instructions
+#if defined(__riscv_zbb) || __ARM_ARCH >= 6 || defined(__x86_64__) || defined(__aarch64__)
+    return __builtin_bswap32(0xffffffff >> (k & 31));
+#else
+    return ((0xff >> (k & 7)) | 0xffffff00u) << (k & 24);
+#endif
+}
+
+void bitui_hline_fast(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
+    x2 += 1;
     if (x1 > x2) SWAP_U16(x1, x2);
 
-    bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = x1, .y = y, .w = x2-x1, .h = 1 });
-    // [not aligned][aligned][not aligned]
+    // [partial fill][full fill][partial fill]
 
-    const uint16_t row_start = y * ctx->stride;
-    uint16_t x1_aligned = x1 / 8;
-    const uint16_t x1_rem = x1 & 7;
-    const uint16_t x2_aligned = x2 / 8;
-    const uint16_t x2_rem = x2 & 7;
+    const uint32_t row_start = y * ctx->stride;
+    uint32_t x1_aligned = row_start + (x1 / (sizeof(uint32_t) * CHAR_BIT)) * sizeof(uint32_t);
+    uint32_t x2_aligned = row_start + (x2 / (sizeof(uint32_t) * CHAR_BIT)) * sizeof(uint32_t);
+    uint32_t x1_rem = bswapped_srl(x1);
+    uint32_t x2_rem = ~bswapped_srl(x2);
+
+    uint32_t *pix = (uint32_t *)(ctx->framebuffer + x1_aligned);
+    uint32_t *end = (uint32_t *)(ctx->framebuffer + x2_aligned);
+
     if (x1_aligned == x2_aligned) {
-        // x1 = 0
-        // x2 = 3
-        // ****....
-        // ^  ^
-        // x1 x2
-        // mask = (0xff >> 0)
-
-        // x1 = 3
-        // x2 = 7
-        // ....****
-        //     ^  ^
-        //     x1 x2
-        // TODO : Xor should also work (and one less op) but I'm not sure at 100%
-        uint8_t mask = (0xff >> x1_rem) & ~(0xff >> x2_rem);
-        bitui_colorize(ctx, row_start + x1_aligned, mask);
+        // First and last fill are the same word. Combine the partial masks.
+        x2_rem = x1_rem & x2_rem;
     } else {
-        uint8_t mask = (0xff >> x1_rem);
-        bitui_colorize(ctx, row_start + x1_aligned, mask);
-        x1_aligned += 1;
+        // First partial fill
+        bitui_colorize32(ctx, pix, x1_rem);
+        pix++;
 
-        const uint8_t fill = ctx->color ? 0xff : 0x00;
-        for (; x1_aligned < x2_aligned; ++x1_aligned) {
-            ctx->framebuffer[row_start + x1_aligned] = fill;
-        }
+        // Fill
+        const uint32_t fill = ctx->color ? 0xffffffff : 0x00000000;
+        for (; pix < end; pix++) {
+            *pix = fill;
+         }
+     }
 
-        if (x2_rem) {
-            mask = ~(0xff >> x2_rem);
-            bitui_colorize(ctx, row_start + x1_aligned, mask);
-        }
-    }
+   // Last partial fill
+   bitui_colorize32(ctx, end, x2_rem);
 }
 
 void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2)
@@ -203,7 +209,7 @@ void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
     bitui_rotate(ctx, &x2, &y2);
 
     if (x1 == x2) bitui_vline(ctx, x1, y1, y2);
-    else if (y1 == y2) bitui_hline(ctx, y1, x1, x2);
+    else if (y1 == y2) bitui_hline_fast(ctx, y1, x1, x2);
     else assert(0 && "Unsupported non axis aligned lines");
 }
 

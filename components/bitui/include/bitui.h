@@ -41,7 +41,6 @@ void bitui_clear(bitui_t ctx, bool color);
 bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point);
 #endif
 
-void bitui_hline(bitui_t ctx, uint16_t y, uint16_t x1, uint16_t x2);
 void bitui_vline(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2);
 
 void bitui_point(bitui_t ctx, uint16_t x, uint16_t y);
