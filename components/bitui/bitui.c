@@ -49,10 +49,9 @@ static inline void bitui_colorize(bitui_t ctx, uint16_t offset, uint8_t updated_
     ctx->framebuffer[offset] = temp;
 }
 
-static inline void bitui_colorize32(bitui_t ctx, uint32_t *pix, uint32_t updated_pixels_mask) {
-    uint32_t temp = *pix & ~updated_pixels_mask;
-    if (ctx->color) temp |= updated_pixels_mask;
-    *pix = temp;
+static inline void bitui_colorize32(uint32_t color, uint32_t *pix, uint32_t updated_pixels_mask) {
+    // https://graphics.stanford.edu/~seander/bithacks.html#ConditionalSetOrClearBitsWithoutBranching
+    *pix ^= (color ^ *pix) & updated_pixels_mask;
 }
 
 #ifdef BITUI_ROTATION
@@ -108,42 +107,58 @@ static inline uint32_t bswapped_srl(uint32_t k) {
 #if defined(__riscv_zbb) || __ARM_ARCH >= 6 || defined(__x86_64__) || defined(__aarch64__)
     return __builtin_bswap32(0xffffffff >> (k & 31));
 #else
-    return ((0xff >> (k & 7)) | 0xffffff00u) << (k & 24);
+    return ((0xffU >> (k & 7)) | 0xffffff00U) << (k & 24);
 #endif
 }
 
+__attribute__((optimize("O2"))) /* Using -Os actually increases the code size and leads to slower code.
+                                   The O2 flag leads to the best code layout and the fastest implementation. */
 void bitui_hline_fast(bitui_t ctx, const uint16_t y, uint16_t x1, uint16_t x2) {
-    x2 += 1;
     if (x1 > x2) SWAP_U16(x1, x2);
+    x2 += 1;
 
     // [partial fill][full fill][partial fill]
 
-    const uint32_t row_start = y * ctx->stride;
-    uint32_t x1_aligned = row_start + (x1 / (sizeof(uint32_t) * CHAR_BIT)) * sizeof(uint32_t);
-    uint32_t x2_aligned = row_start + (x2 / (sizeof(uint32_t) * CHAR_BIT)) * sizeof(uint32_t);
+    uint8_t * const framebuffer = ctx->framebuffer + y * ctx->stride;
     uint32_t x1_rem = bswapped_srl(x1);
+    const uint32_t color = -ctx->color;
     uint32_t x2_rem = ~bswapped_srl(x2);
 
-    uint32_t *pix = (uint32_t *)(ctx->framebuffer + x1_aligned);
-    uint32_t *end = (uint32_t *)(ctx->framebuffer + x2_aligned);
+    uint32_t x1_aligned = (x1 / (sizeof(uint32_t) * CHAR_BIT)) * sizeof(uint32_t);
+    uint32_t x2_aligned = (x2 / (sizeof(uint32_t) * CHAR_BIT)) * sizeof(uint32_t);
+    uint32_t *pix = (uint32_t *)(framebuffer + x1_aligned);
 
     if (x1_aligned == x2_aligned) {
-        // First and last fill are the same word. Combine the partial masks.
-        x2_rem = x1_rem & x2_rem;
+        bitui_colorize32(color, pix, x1_rem & x2_rem);
     } else {
-        // First partial fill
-        bitui_colorize32(ctx, pix, x1_rem);
+        bitui_colorize32(color, pix, x1_rem);
         pix++;
 
-        // Fill
-        const uint32_t fill = ctx->color ? 0xffffffff : 0x00000000;
-        for (; pix < end; pix++) {
-            *pix = fill;
-         }
-     }
+        uint32_t *end = (uint32_t *)(framebuffer + x2_aligned);
+        bitui_colorize32(color, end, x2_rem);
 
-   // Last partial fill
-   bitui_colorize32(ctx, end, x2_rem);
+        // Fill
+#if 0 && defined(BITUI_NO_UNROLL_LOOPS) /* Not worth it, code size too big for a small improvement */
+        uint32_t *rem =  pix + (uint32_t)(end - pix) % 4;
+
+        while (pix < rem) {
+            *pix = color;
+            pix++;
+        }
+
+        while (pix < end) {
+            pix[3] = color;
+            pix[2] = color;
+            pix[1] = color;
+            pix[0] = color;
+            pix += 4;
+        }
+#else
+        do {
+            *pix++ = color;
+        } while (pix < end);
+#endif
+     }
 }
 
 void bitui_vline_fast(bitui_t ctx, uint16_t x, uint16_t y1, uint16_t y2) {

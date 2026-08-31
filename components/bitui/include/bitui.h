@@ -24,12 +24,12 @@ typedef enum {
 
 typedef struct {
     uint16_t width, height, stride;
+    bool color;
     uint8_t *framebuffer;
 
 #ifdef BITUI_ROTATION
     bitui_rot rot;
 #endif
-    bool color;
     bitui_rect_t dirty;
 } bitui_ctx_t;
 
