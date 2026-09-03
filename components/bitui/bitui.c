@@ -83,12 +83,12 @@ bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point) {
 #define ROW_AT(X, Y) (Y)
 #define STRIDE(Ctx) (ctx->stride)
 #define COL_AT(X, Y) ((X)/8)
-#define BIT_AT(X, Y) (0x80 >> ((X) & 7))
+#define BIT_AT(X, Y) (0x80U >> ((X) & 7))
 #else
 #define ROW_AT(X, Y) ((Y)/8)
 #define STRIDE(Ctx) (ctx->width)
 #define COL_AT(X, Y) (X)
-#define BIT_AT(X, Y) (0x80 >> ((Y) & 7))
+#define BIT_AT(X, Y) (0x80U >> ((Y) & 7))
 #endif
 #define IDX_AT(Ctx, X, Y) (ROW_AT(X, Y) * STRIDE(Ctx) + COL_AT(X, Y))
 
@@ -273,26 +273,41 @@ void bitui_rect(bitui_t ctx, const bitui_rect_t rect) {
     bitui_line(ctx,  left, bottom, right, bottom);
 }
 
-void bitui_paste_bitstream(bitui_t ctx, const uint8_t *src_bitstream, uint16_t src_w, uint16_t src_h, const uint16_t dst_x, const uint16_t dst_y)
+static inline void bitui_colorize8(uint32_t color, uint8_t *pix, uint8_t updated_pixels_mask) {
+    // https://graphics.stanford.edu/~seander/bithacks.html#ConditionalSetOrClearBitsWithoutBranching
+    *pix ^= (color ^ *pix) & updated_pixels_mask;
+}
+
+void bitui_paste_bitstream(bitui_ctx_t *ctx, const uint8_t *src_bitstream, uint16_t src_w, uint16_t src_h, const uint16_t dst_x, const uint16_t dst_y)
 {
-    uint8_t bits = 0;
-    uint8_t bit = 0;
-    bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = dst_x, .y = dst_y, .w = src_w, .h = src_h });
+    if (src_w == 0 || src_h == 0) return;
+    uint32_t bits = 0x10000;
 
-    ctx->color = !ctx->color;
-    for (uint16_t y = dst_y; y < dst_y + src_h; y++) {
-        for (uint16_t x = dst_x; x < dst_x + src_w; x++) {
-            if (!(bit & 7))
-                bits = *(src_bitstream++);
+    const uint32_t stride = ctx->stride;
+    uint8_t *pix = ctx->framebuffer + dst_y * stride;
+    const uint32_t color = -(!ctx->color);
 
-            if (bits & 0x80)
-                bitui_point(ctx, x, y);
+    uint32_t h = src_h;
+    const uint32_t end_x = dst_x + src_w;
+    do {
+        uint32_t x = dst_x;
+        do {
+            if (bits & 0x10000) { // TODO: test unlikely() here
+                bits = 0x100 | *src_bitstream;
+                src_bitstream++;
+            }
 
+            uint32_t c = color ^ ((int32_t)(bits << 24) >> 31);
+            static_assert((-1 >> 1) == -1, "Target compiler does not implement arithmetic right shift!");
+
+            uint8_t mask = BIT_AT(x, dy);
+            bitui_colorize8(c, pix + x/8, mask);
             bits <<= 1;
-            ++bit;
-        }
-    }
-    ctx->color = !ctx->color;
+            x++;
+        } while (x < end_x);
+        pix += stride;
+        h--;
+    } while (h > 0);
 }
 
 void bitui_paste_bitmap(bitui_t ctx, const uint8_t *src_bitmap, uint16_t src_w, uint16_t src_h, uint16_t dst_x, uint16_t dst_y)
