@@ -256,21 +256,21 @@ void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
     bitui_rotate(ctx, &x1, &y1);
     bitui_rotate(ctx, &x2, &y2);
 
-    if (x1 == x2) bitui_vline_fast(ctx, x1, y1, y2);
-    else if (y1 == y2) bitui_hline_fast(ctx, y1, x1, x2);
+    if (y1 == y2) bitui_hline_fast(ctx, y1, x1, x2);
+    else if (x1 == x2) bitui_vline_fast(ctx, x1, y1, y2);
     else assert(0 && "Unsupported non axis aligned lines");
 }
 
-void bitui_rect(bitui_t ctx, const bitui_rect_t rect) {
+void bitui_rect_(bitui_t ctx, const bitui_rect_t rect) {
     const uint16_t left   = rect.x;
     const uint16_t top    = rect.y;
     const uint16_t right  = rect.x + rect.w - 1;
     const uint16_t bottom = rect.y + rect.h - 1;
 
-    bitui_line(ctx,  left,    top, right,    top);
-    bitui_line(ctx,  left,    top,  left, bottom);
-    bitui_line(ctx, right,    top, right, bottom);
-    bitui_line(ctx,  left, bottom, right, bottom);
+    bitui_hline_fast(ctx,    top, left,  right);
+    bitui_hline_fast(ctx, bottom, left,  right);
+    bitui_vline_fast(ctx,   left,  top + 1, bottom - 1);
+    bitui_vline_fast(ctx,  right,  top + 1, bottom - 1);
 }
 
 static inline void bitui_colorize8(uint32_t color, uint8_t *pix, uint8_t updated_pixels_mask) {

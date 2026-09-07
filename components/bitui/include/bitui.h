@@ -44,7 +44,8 @@ bitui_point_t bitui_apply_rot(bitui_t ctx, bitui_point_t point);
 void bitui_point(bitui_t ctx, uint16_t x, uint16_t y);
 void bitui_line(bitui_t ctx, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2);
 
-void bitui_rect(bitui_t ctx, bitui_rect_t rect);
+void bitui_rect_(bitui_t ctx, bitui_rect_t rect);
+#define bitui_rect(Ctx, ...) bitui_rect_((Ctx), (bitui_rect_t){ __VA_ARGS__ })
 void bitui_rrect(bitui_t ctx, bitui_rect_t rect, bitui_rect_t radius);
 
 void bitui_paste_bitmap(bitui_t ctx, const uint8_t *src_bitmap, uint16_t src_w, uint16_t src_h, uint16_t dst_x, uint16_t dst_y);

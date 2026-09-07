@@ -123,7 +123,7 @@ static void draw_widget_outline(bitui_t ctx, bitui_rect_t bbox, const char *labe
     bbox.y -= FONT_HEIGHT/2 + PADDING_V;
     bbox.h += FONT_HEIGHT/2 + PADDING_V;
     ctx->color = false;
-    bitui_rect(ctx, bbox);
+    bitui_rect_(ctx, bbox);
 
     struct size s = measure_text(&FONT_SMALL, label);
     ctx->color = true;
