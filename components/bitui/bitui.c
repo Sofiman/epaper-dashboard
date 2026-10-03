@@ -310,6 +310,49 @@ void bitui_paste_bitstream(bitui_ctx_t *ctx, const uint8_t *src_bitstream, uint1
     } while (h > 0);
 }
 
+
+void bitui_paste_bitstream_rle(bitui_ctx_t *ctx, const uint8_t *src_bitstream, uint16_t src_w, uint16_t src_h, const uint16_t dst_x, const uint16_t dst_y)
+{
+    if (src_w == 0 || src_h == 0) return;
+    const uint32_t stride = ctx->stride;
+    uint8_t *pix = ctx->framebuffer + dst_y * stride;
+    const uint32_t color = -(!ctx->color);
+
+    int32_t width = src_w;
+    uint32_t x_rem = dst_x % 8;
+    int32_t count = 0;
+    uint32_t c = 0;
+    do {
+        if (count == 0) {
+            // TODO: try decoding 2 or 4 runs at the same time
+            uint8_t codeword = *src_bitstream++;
+            // [1-bit color][4-bit zeros][3-bit count + 1]
+            c = color ^ ((int32_t)(codeword << 24) >> 31);
+            count = (codeword & 0x7f) + 1;
+        }
+
+        int32_t sum = (int32_t)(x_rem + count);
+        uint32_t mask = 0xffU >> x_rem;
+        uint32_t umask = ~(0xffU >> sum);
+        int32_t remaining = 8 - sum;
+
+        bitui_colorize8(c, pix, mask & umask);
+
+        if (remaining >= 0) {
+            x_rem = (x_rem + count) % 8;
+            width -= count;
+            count = 0;
+        } else {
+            pix += 1;
+            x_rem = 0;
+            count = count - -(remaining);
+            width -= -remaining;
+        }
+
+        assert(count >= 0);
+    } while (width > 0);
+}
+
 void bitui_paste_bitmap(bitui_t ctx, const uint8_t *src_bitmap, uint16_t src_w, uint16_t src_h, uint16_t dst_x, uint16_t dst_y)
 {
     bitui_merge_rect(&ctx->dirty, (bitui_rect_t){ .x = dst_x, .y = dst_y, .w = src_w, .h = src_h });
