@@ -310,47 +310,62 @@ void bitui_paste_bitstream(bitui_ctx_t *ctx, const uint8_t *src_bitstream, uint1
     } while (h > 0);
 }
 
+#define MIN(X, Y) ((X) < (Y) ? (X) : (Y))
 
 void bitui_paste_bitstream_rle(bitui_ctx_t *ctx, const uint8_t *src_bitstream, uint16_t src_w, uint16_t src_h, const uint16_t dst_x, const uint16_t dst_y)
 {
     if (src_w == 0 || src_h == 0) return;
+
     const uint32_t stride = ctx->stride;
-    uint8_t *pix = ctx->framebuffer + dst_y * stride;
-    const uint32_t color = -(!ctx->color);
+    uint8_t *framebuffer = ctx->framebuffer;
+    uint32_t color = -(!ctx->color);
 
-    int32_t width = src_w;
-    uint32_t x_rem = dst_x % 8;
-    int32_t count = 0;
-    uint32_t c = 0;
-    do {
-        if (count == 0) {
+    const uint32_t end_x = dst_x + src_w;
+    uint8_t *       currentLine = framebuffer + dst_y * stride;
+    uint8_t * const lastLine    = currentLine + src_h * stride;
+
+    uint32_t count = 0;
+    uint32_t x = dst_x;
+    uint8_t highNibbile = true;
+    for (;;) {
+        while (count == 0) {
             // TODO: try decoding 2 or 4 runs at the same time
+#ifndef DEBUG_RLE
+            uint8_t codeword = *src_bitstream;
+            color ^= -(codeword != 127);                   // Invert color after each burst
+
+            if (codeword >> 7) {
+                highNibbile ^= 1;                          // Toggle between highNibble/lowNibble
+                codeword >>= (highNibbile - 1) & 3u;       // Select the lower or upper 3 bits of the duo
+                const uint32_t offset = highNibbile << 3;  // Calculate the duo offset 0 or 8, either [1;8] or [9;16]
+                codeword = ((codeword & 15) | offset) + 1; // Combine the 6th bit with the offset and add one
+            }
+            src_bitstream += highNibbile;                  // +1 in long form, +0/+1 in duo form
+            count = codeword;
+#else
             uint8_t codeword = *src_bitstream++;
-            // [1-bit color][4-bit zeros][3-bit count + 1]
-            c = color ^ ((int32_t)(codeword << 24) >> 31);
             count = (codeword & 0x7f) + 1;
+            color ^= -1UL;
+#endif
         }
 
-        int32_t sum = (int32_t)(x_rem + count);
-        uint32_t mask = 0xffU >> x_rem;
-        uint32_t umask = ~(0xffU >> sum);
-        int32_t remaining = 8 - sum;
+        uint32_t remainingWidth = end_x - x;
+        uint32_t remainingBits = x % 8;
+        uint32_t fillable = MIN(8 - remainingBits, count);
+        uint32_t bitsToSet = MIN(fillable, remainingWidth);
 
-        bitui_colorize8(c, pix, mask & umask);
+        uint32_t mask = (uint8_t)((int8_t)(0x80) >> (bitsToSet - 1)) >> remainingBits;
+        bitui_colorize8(color, &currentLine[x/8], mask);
 
-        if (remaining >= 0) {
-            x_rem = (x_rem + count) % 8;
-            width -= count;
-            count = 0;
-        } else {
-            pix += 1;
-            x_rem = 0;
-            count = count - -(remaining);
-            width -= -remaining;
+        count -= bitsToSet;
+        x += bitsToSet;
+
+        if (x >= end_x) {
+            x = dst_x;
+            currentLine += stride;
+            if (currentLine >= lastLine) break;
         }
-
-        assert(count >= 0);
-    } while (width > 0);
+    }
 }
 
 void bitui_paste_bitmap(bitui_t ctx, const uint8_t *src_bitmap, uint16_t src_w, uint16_t src_h, uint16_t dst_x, uint16_t dst_y)
